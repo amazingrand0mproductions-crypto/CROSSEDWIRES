@@ -1,4 +1,4 @@
-// CROSSED WIRES v3 — Output tab
+// CROSSED WIRES v4 — Output tab
 const modifier = (text) => {
   text = CW_onOutput(text);
   return { text };
