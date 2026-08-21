@@ -1,7 +1,7 @@
 CROSSED WIRES — Adaptive Relationship Engine for AI Dungeon
 ==============================================================
 
-Crossed Wires v6 keeps the persistent directional relationship system from v5, but it is no longer built only for relationship-drama scenarios. It now adapts its social logic to the type of adventure being played so relationships support the scenario instead of replacing it.
+
 
 A horror story should still feel like horror. A military scenario should care about command, comradeship and duty. A workplace story should understand hierarchy and professional boundaries. A family story should use shared history and expectations. A superhero story should understand secret identities and responsibility. Romance can still develop naturally inside any of them when the story actually supports it.
 
