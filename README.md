@@ -1,109 +1,279 @@
-⚡ CROSSED WIRES v3 — Relationship Drama Engine for AI Dungeon
+CROSSED WIRES — Adaptive Relationship Engine for AI Dungeon
+==============================================================
 
-I’ve basically rebuilt Crossed Wires after testing it against longer adventures. The goal is still the same: relationships should actually matter instead of an NPC forgetting a betrayal 10 turns later or becoming your soulmate because you were nice twice.
+Crossed Wires v6 keeps the persistent directional relationship system from v5, but it is no longer built only for relationship-drama scenarios. It now adapts its social logic to the type of adventure being played so relationships support the scenario instead of replacing it.
 
-This isn’t a generic NPC autonomy script. It’s made specifically for romance, friendships, rivalries, messy friend groups, dating stories, soap-opera drama, court intrigue, superhero relationship drama, reality-show chaos etc.
+A horror story should still feel like horror. A military scenario should care about command, comradeship and duty. A workplace story should understand hierarchy and professional boundaries. A family story should use shared history and expectations. A superhero story should understand secret identities and responsibility. Romance can still develop naturally inside any of them when the story actually supports it.
 
-❤️ 11 separate relationship pressures
-• Trust
-• Affection
-• Respect
-• Loyalty
-• Openness
-• Attachment
-• Attraction
-• Jealousy
-• Resentment
-• Fear
-• Tension
+INSTALLATION
+------------
+1. Open your AI Dungeon Scenario on the web.
+2. Details -> Scripting -> enable Scripts -> Edit Scripts.
+3. Put Library.js in Library.
+4. Put Input.js in Input.
+5. Put Context.js in Context. Keep // @cache-compatible as the first line.
+6. Put Output.js in Output.
+7. Save.
+8. Start or continue an adventure. Crossed Wires automatically creates/upgrades the Crossed Wires Config Story Card.
 
-Relationships are directional. Mara → YOU can be completely different from John → Mara, and Mara → John can differ from John → Mara. The script never creates YOU → NPC stats, so it doesn’t decide what your character feels.
+UPGRADING FROM v2-v5
+--------------------
+Replace all four tabs. Existing state.crossedWires relationship history is migrated in place rather than intentionally wiped.
 
-🧠 Relationships have actual continuity
+The config card is upgraded to v6 while preserving recognized older settings. New adaptive settings receive safe defaults.
 
-The AI identifies meaningful social events, but JavaScript owns the numbers and persistence. Support, honesty, vulnerability, flirting, dates, promises, confessions, commitment, rejection, jealousy, lies, betrayal, boundaries, breakups, reconciliation, infidelity, marriage, sacrifice and loads more all affect the relationship differently.
+ADAPTIVE SCENARIO ENGINE
+------------------------
+Default: Scenario Mode = AUTO
 
-A relationship can be affectionate AND resentful. Someone can still be loyal while furious with you. Attraction can survive distrust. It doesn’t squash everything into one “likes you 72/100” stat.
+AUTO examines the current model context, recent history, Character/Story Cards and scenario placeholders. It selects a primary profile and, when strongly supported, a secondary profile.
 
-Major betrayal, abandonment and boundary violations can also leave scars, so one apology doesn’t magically fix everything.
+Built-in profiles:
+- UNIVERSAL
+- ROMANCE
+- SLICE_OF_LIFE
+- HORROR
+- FANTASY
+- SCI_FI
+- SUPERHERO
+- CRIME
+- MYSTERY
+- SURVIVAL
+- POLITICAL
+- MILITARY
+- WORKPLACE
+- SCHOOL
+- FAMILY
+- ADVENTURE
+- COMEDY
+- HISTORICAL
+- SPORTS
 
-⏳ No instant soulmates
+Anything that does not fit confidently falls back to UNIVERSAL. This is intentional: Crossed Wires should not force an unknown genre into the wrong template.
 
-New NPCs have to survive an observation period before the engine strongly guides their relationship. By default that means 3 turns AND 2 appearances. Early impressions count, but at reduced strength.
+Hybrid examples:
+- superhero + romance
+- fantasy + political
+- crime + mystery
+- horror + survival
+- school + sports
+- historical + family
 
-You can also choose SLOW, BALANCED or FAST relationship pacing. SLOW is the default because I wanted long scenarios to actually have room for slow burns.
+Use !wireprofile to see what AUTO currently believes the scenario is.
 
-📈 Relationship trajectory
+Manual override:
+Set Scenario Mode in the Config card to one of the profiles above. Friendly forms such as SCI FI or SLICE OF LIFE are normalized automatically.
 
-Crossed Wires now works out whether a bond is forming, warming, cooling, steady or volatile, and it notices unresolved stuff like:
+ADAPTATION STRENGTH
+-------------------
+LIGHT — Mostly universal behavior. Scenario signals lightly influence event/twist selection.
+BALANCED — Stronger scenario shaping while retaining a broad universal pool.
+FULL — Default. Scenario-specific twists that do not fit the detected genre are heavily suppressed/excluded while universal relationship logic remains available.
 
-• betrayal that still needs repairing
-• breakup feelings that aren’t actually gone
-• relationship strain
-• jealousy/exclusivity problems
-• incompatibility
-• chemistry in an undefined relationship
-• guardedness and trust issues
+AUTO twist frequency also respects genre. Romance/slice-of-life can tolerate more social pressure; horror, survival, mystery, military and action-heavy profiles automatically get more breathing room. If you enter an exact Twist Chance, your number is used directly and is not scenario-scaled.
 
-🎭 Much better twist system
+ROLE AWARENESS
+--------------
+Crossed Wires can now learn what kind of relationship two characters actually have, not just how positive or negative it is.
 
-The twist engine is relationship-aware instead of just throwing random drama at the story.
+Supported roles include:
+stranger, acquaintance, friend, best friend, family, parent, child, sibling, relative, romantic, ex, rival, ally, enemy, mentor, student, superior, subordinate, colleague, teammate, political and professional.
 
-Possible pressure includes confessions, mixed signals, old flames, triangles, rumours, secret relationships, friend-group splits, family/friend disapproval, loyalty tests, career or distance problems, jealousy, breakups, reconciliation chances, proposal/cohabitation pressure, temptation, infidelity suspicion, adult relationship aftermath, parenthood complications, major secrets and a Wild Card that invents something based on the actual relationship history.
+Roles are directional where appropriate. Mentor -> student becomes student -> mentor in the reverse direction. Superior -> subordinate is likewise inverted.
 
-There are five modes:
-OFF / GROUNDED / DRAMATIC / WILD / UNHINGED
+Why this matters:
+- Family bonds are not automatically given romantic twists.
+- Workplace/hierarchy bonds do not assume attraction from proximity.
+- Military obedience is not treated as affection.
+- Rivalry can remain rivalry instead of automatically becoming chemistry.
+- Established romantic/ex roles can receive more relevant romantic pressure.
+- Family, professional, teammate and political scenarios receive complications that match their actual relationship structure.
 
-It also has pair cooldowns, repeated-twist cooldowns and a “recent drama” check so it doesn’t stack five disasters in a row just because RNG hates you 😂
+Role tags are hidden machine data and are removed from visible output.
 
-You can force a twist too:
-`!spark`
-`!spark small`
-`!spark medium`
-`!spark major`
+SCENARIO-SHAPED RELATIONSHIP EVENTS
+-----------------------------------
+v6 adds relationship evidence beyond romance/friendship, including:
+- cooperation
+- dependability
+- competence proven
+- solidarity
+- shared duty
+- mentorship/guidance
+- mercy
+- ideological alignment/conflict
+- command backed/refused
+- resource sharing/denial
+- secret identity reveal
+- accusation/suspicion cleared
+- grief support/blame
+- professional support
+- credit shared/stolen
+- family support/favoritism
+- team victory/failure
+- political alliance/public scandal
+- blackmail
 
-If there isn’t an eligible relationship yet, the forced twist stays armed instead of disappearing.
+These feed the same durable trust/respect/loyalty/etc. model, allowing genre events to change relationships without inventing a separate score system for every scenario.
 
-🔞 Adult relationship themes
+SCENARIO-SHAPED TWISTS
+----------------------
+When Scenario Twists is ON, the engine can choose complications that fit the active profile.
 
-Optional adult-cast mechanics cover consensual intimacy, attraction, commitment, jealousy, temptation, cheating, messy/toxic dynamics, breakup aftermath and parenthood-related complications.
+Examples:
+HORROR / SURVIVAL
+- fear breaks trust
+- survivor guilt
+- scarce resource choice
+- leadership challenge
 
-The relationship engine keeps intimacy non-explicit/fade-to-black and focuses on the consequences, expectations, consent, boundaries and emotional fallout.
+FANTASY / HISTORICAL / POLITICAL
+- oath versus personal loyalty
+- faction divide
+- magical obligation when magic already exists
+- reputation constraints
 
-It also has stronger age gating now. NPCs explicitly under 18 are marked as minors and excluded from mature mechanics, and an under-18 Age placeholder overrides the player-adult config.
+SCI_FI / SUPERHERO
+- mission versus bond
+- identity uncertainty
+- secret-identity strain
+- heroic-code disagreement
 
-🪪 Character Card aliases finally merge properly
+CRIME / MYSTERY
+- informant suspicion
+- leverage changes hands
+- withheld clue
+- suspicion falling on someone close
 
-If the story knows somebody as “Mara” and later her Character Card establishes “Mara Voss, Mara”, Crossed Wires merges the old history into Mara Voss instead of accidentally creating two relationship records.
+MILITARY
+- order versus loyalty
+- command conflict
+- promotion/rank rift
 
-⚙️ Built for long adventures
+WORKPLACE / SCHOOL
+- credit disputes
+- professional boundaries
+- peer-group shifts
+- mentor expectations
 
-This was one of the biggest v3 changes:
+FAMILY
+- old family wounds
+- expectations and obligation
+- quiet life changes
 
-• relationship ledger increased from 180 → 2500 events
-• indexed relationship lookups instead of rescanning the full ledger for every pair
-• retry/regenerate replaces same-turn relationship evidence instead of stacking both versions
-• undo removes relationship history from deleted future turns
-• context only includes relationships relevant to the current scene
-• live context headroom is respected
-• append-only cache-compatible Context tab for AI Dungeon’s newer cache-efficient context support
+SPORTS
+- team-role conflict
+- performance pressure
+- promotion/captaincy rivalry
 
-If there isn’t enough context room for the full tracking protocol, it shrinks itself instead of chopping up the existing story context.
+COMEDY / SLICE OF LIFE
+- harmless social disasters
+- awkward matchmaking when romance is plausible
+- routine/life changes
 
-⚙️ Config Story Card
+Scenario twists remain optional pressure seeds. They are never predetermined canon and should be ignored by the narrator when continuity does not support them.
 
-The script automatically creates a Crossed Wires Config card. You can change pacing, observation time, context budget, twist chance/mode/cooldowns, romance, NPC-to-NPC tracking, adult themes, infidelity, breakups, parenthood, toxic drama etc. while the adventure is running.
+CORE RELATIONSHIP MODEL
+-----------------------
+Crossed Wires still tracks eleven independent pressures:
+Trust, Affection, Respect, Loyalty, Openness, Attachment, Attraction, Jealousy, Resentment, Fear and Tension.
 
-📊 Commands
+Relationships are directional. Mara -> YOU can differ from Alex -> Mara. The engine never assigns the player's thoughts, feelings, dialogue, consent or decisions.
 
-`!wire NAME` — inspect one character
-`!wires` — show tracked relationships
-`!wiretwists` — recent twist history
-`!wirestatus` — engine/config status
-`!spark [small/medium/major]` — force a twist
-`!wireforget NAME` — remove a mistaken/retired NPC and their tracked history
-`!wirehelp` — help
+OBSERVATION
+-----------
+New NPCs remain provisional until BOTH observation gates are met. Default:
+- 3 turns
+- 2 appearances
 
-All the CW machine tags are stripped before the output reaches you, so normal gameplay still just looks like a normal story.
+Early evidence is retained conservatively, preventing instant soulmate/enemy conclusions.
 
-I’m mainly interested in seeing how it holds up in really long relationship-heavy scenarios now. If anyone manages to create an absolutely cursed relationship web on UNHINGED, I want to hear about it 😂
+MEMORY & REPAIR
+---------------
+Recent memories plus older Memory Anchors preserve major turning points.
+
+Major betrayal, abandonment and boundary damage create durable scars. Apology or forgiveness can reduce immediate resentment/tension without magically restoring trust.
+
+Earned repair events:
+- trust_repair
+- boundary_repair
+- abandonment_repair
+
+MATURE THEMES
+-------------
+Adult-only mechanics still require all participants to be established adults. Numeric ages, written ages and adult decade descriptions are supported. Explicit under-18 information overrides adult assumptions.
+
+Adult intimacy remains non-explicit/fade-to-black. Crossed Wires focuses on expectations, consent, boundaries, exclusivity, jealousy, trust, commitment and aftermath.
+
+A SCHOOL profile does not bypass age gating.
+
+CONFIG CARD
+-----------
+The Crossed Wires Config card has:
+- Title: Crossed Wires Config
+- Triggers: blank
+- Type: Custom
+- Entry: editable settings only
+- Notes: full explanations
+
+Important v6 settings:
+Scenario Mode: AUTO
+Adaptation Strength: FULL
+Role Awareness: ON
+Scenario Twists: ON
+
+Existing relationship, drama, mature-content, pacing, observation and context settings remain available.
+
+COMMANDS
+--------
+!wire NAME        Inspect relationships involving one character
+!wires            Inspect all tracked relationships
+!wiretwists       Show recent twist seeds, profile and whether they were used
+!wirestatus       Show engine/config status
+!wireprofile      Show AUTO/manual adaptation profile and top detected signals
+!wireforget NAME  Remove one NPC and their relationship history
+!spark            Force an eligible twist next normal turn
+!spark small      Force a low-risk beat
+!spark medium     Force a medium complication
+!spark major      Force a high-stakes twist when eligible
+!wirehelp         Show command help
+
+LOW-CONTEXT BEHAVIOR
+--------------------
+Crossed Wires remains append-only and respects live info.maxChars headroom.
+
+Normal headroom:
+- scenario profile
+- active directional relationships
+- roles
+- turning points
+- twist seed
+- full event protocol
+
+Reduced headroom:
+- compact profile/relationship guidance
+- reduced adaptive event vocabulary
+- relationship and role tracking remain active where possible
+
+Extremely tight headroom:
+- continuity-only micro block
+
+No safe headroom:
+- original context remains untouched
+
+TECHNICAL NOTES
+---------------
+- Persistent state: state.crossedWires
+- Adaptive profile source: current model context + recent history + Story Cards + placeholders
+- Profile mode can be AUTO or manual
+- Primary + optional secondary profile
+- Relationship roles persisted separately from numeric scores
+- Context injection remains append-only
+- Context respects info.maxChars
+- Ledger cap: 2,500 events
+- Indexed directional relationship lookups
+- Hidden CW_PERSON / CW_ROLE / CW_EVT / CW_TWIST tags stripped before display
+- Same-turn regenerate replaces that turn's machine-derived relationship evidence
+- Undo removes future relationship evidence, sightings, roles and twist data
+- Character Story Cards can canonicalize names/aliases
+- Config migration preserves recognized older values
