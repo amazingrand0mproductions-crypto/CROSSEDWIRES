@@ -1,6 +1,6 @@
 // ============================================================================
-// CROSSED WIRES — Relationship Drama Engine for AI Dungeon
-// Version 5 — relationship-first continuity, cleaner config, smarter tagging and drama control
+// CROSSED WIRES — Adaptive Relationship Engine for AI Dungeon
+// Version 6 — adaptive social continuity for any genre, relationship role awareness and scenario-shaped drama
 // Put this ENTIRE file in the Library tab.
 //
 // Design goal: relationships create plot without turning every turn into drama.
@@ -8,7 +8,7 @@
 // state, scoring, pacing, scars, milestones, trajectory and twist selection.
 // ============================================================================
 
-const CW_ENGINE_VERSION = 5;
+const CW_ENGINE_VERSION = 6;
 
 let CW_RUNTIME_EVENT_INDEX = null;
 
@@ -26,6 +26,10 @@ const CW_DEFAULT_CONFIG = {
   relationshipPace: "SLOW",       // SLOW | BALANCED | FAST
   eventSensitivity: "BALANCED",  // CONSERVATIVE | BALANCED | EXPRESSIVE
   memoryAnchors: 2,                // older turning points included per bond
+  scenarioMode: "AUTO",           // AUTO or an explicit scenario profile
+  adaptationStrength: "FULL",     // LIGHT | BALANCED | FULL
+  roleAwareness: true,
+  enableScenarioTwists: true,
   npcInitiative: true,
   enableNpcNpc: true,
   enableRomance: true,
@@ -53,12 +57,12 @@ const CW_METRICS = [
 
 const CW_EVENT_EFFECTS = {
   warmth:                  { affection: 3, trust: 1, tension: -1 },
-  banter:                  { affection: 2, attraction: 1, tension: -1 },
+  banter:                  { affection: 2, tension: -1 },
   support:                 { affection: 4, trust: 3, loyalty: 2, attachment: 1 },
   empathy:                 { trust: 3, affection: 3, openness: 3, resentment: -1 },
   honesty:                 { trust: 5, openness: 4, respect: 1 },
   vulnerability:           { trust: 4, affection: 3, openness: 6, attachment: 2, tension: -1 },
-  admiration:              { respect: 5, affection: 1, attraction: 1 },
+  admiration:              { respect: 5, affection: 1 },
   quality_time:            { affection: 4, attachment: 2, trust: 1, tension: -2 },
   shared_secret:           { trust: 5, openness: 5, attachment: 3, tension: 1 },
   protection:              { trust: 5, affection: 3, loyalty: 5, attachment: 2, fear: -2 },
@@ -92,6 +96,39 @@ const CW_EVENT_EFFECTS = {
   boundary_repair:         { trust: 3, respect: 5, openness: 3, resentment: -4, fear: -2, tension: -4 },
   abandonment_repair:      { trust: 3, affection: 2, attachment: 3, openness: 2, resentment: -4, fear: -2, tension: -3 },
 
+  // Scenario-adaptive social events. These keep Crossed Wires useful when the
+  // central bond is comradeship, family, hierarchy, rivalry, politics, survival
+  // or professional trust rather than romance.
+  cooperation:             { trust: 3, respect: 3, loyalty: 2, affection: 1 },
+  dependability:           { trust: 5, respect: 3, loyalty: 3 },
+  competence_proven:       { respect: 6, trust: 2 },
+  solidarity:              { loyalty: 5, trust: 3, attachment: 2, affection: 2 },
+  shared_duty:             { loyalty: 4, respect: 3, attachment: 2 },
+  mentorship:              { trust: 3, respect: 5, openness: 2, attachment: 1 },
+  guidance:                { trust: 2, respect: 3, openness: 2 },
+  mercy:                   { trust: 5, respect: 4, fear: -3, resentment: -2 },
+  ideological_alignment:   { respect: 4, trust: 2, loyalty: 2, openness: 1 },
+  ideological_conflict:    { respect: -1, trust: -2, resentment: 2, tension: 5, openness: 1 },
+  command_backed:          { trust: 3, respect: 4, loyalty: 4 },
+  command_refused:         { trust: -2, respect: -2, loyalty: -3, resentment: 2, tension: 4 },
+  resource_shared:         { trust: 4, loyalty: 3, affection: 2, respect: 2 },
+  resource_denied:         { trust: -4, loyalty: -2, resentment: 4, tension: 4 },
+  secret_identity_revealed:{ trust: 5, openness: 7, attachment: 2, tension: 2 },
+  accusation:              { trust: -5, respect: -2, resentment: 3, tension: 6 },
+  suspicion_cleared:       { trust: 5, resentment: -3, tension: -5, openness: 2 },
+  grief_support:           { trust: 4, affection: 4, attachment: 3, openness: 3 },
+  grief_blame:             { trust: -4, affection: -3, resentment: 5, tension: 5 },
+  professional_support:    { trust: 3, respect: 4, loyalty: 2 },
+  credit_shared:           { trust: 3, respect: 4, affection: 1 },
+  credit_stolen:           { trust: -6, respect: -5, resentment: 6, tension: 4 },
+  family_support:          { trust: 4, affection: 5, loyalty: 4, attachment: 4 },
+  favoritism:              { trust: -3, respect: -2, resentment: 5, jealousy: 3, tension: 4 },
+  team_victory:            { trust: 3, respect: 4, loyalty: 3, affection: 2 },
+  team_failure:            { trust: -1, respect: -1, resentment: 2, tension: 4 },
+  political_alliance:      { trust: 2, respect: 3, loyalty: 4, openness: 1, tension: 1 },
+  public_scandal:          { trust: -4, respect: -5, resentment: 3, tension: 6 },
+  blackmail:               { trust: -9, respect: -6, resentment: 7, fear: 5, tension: 8, openness: -5 },
+
   insult:                  { affection: -3, respect: -3, resentment: 3, tension: 4 },
   threat:                  { trust: -6, fear: 6, resentment: 4, tension: 6, openness: -3 },
   deception:               { trust: -6, openness: -5, respect: -1, resentment: 3 },
@@ -106,7 +143,7 @@ const CW_EVENT_EFFECTS = {
   humiliation:             { respect: -5, affection: -4, resentment: 6, tension: 5, openness: -3 },
   conflict:                { trust: -2, affection: -1, resentment: 2, tension: 5 },
   incompatibility:         { affection: -1, attachment: -2, tension: 5, openness: 2 },
-  rivalry:                 { respect: 2, attraction: 1, resentment: 1, tension: 5 },
+  rivalry:                 { respect: 2, resentment: 1, tension: 5 },
   suspicion:               { trust: -4, jealousy: 3, tension: 4, openness: -2 },
   jealousy_episode:        { jealousy: 8, trust: -2, resentment: 2, tension: 5, openness: -1 },
   snooping:                { trust: -6, respect: -4, jealousy: 4, resentment: 4, tension: 5 },
@@ -131,7 +168,80 @@ const CW_ROMANCE_EVENTS = [
   "temptation", "exclusivity_mismatch", "infidelity"
 ];
 const CW_MATURE_EVENTS = ["adult_intimacy", "casual_intimacy", "infidelity", "temptation", "exclusivity_mismatch", "parenthood_news"];
-const CW_TOXIC_EVENTS = ["manipulation", "coercive_pressure", "boundary_violated", "snooping"];
+const CW_TOXIC_EVENTS = ["manipulation", "coercive_pressure", "boundary_violated", "snooping", "blackmail"];
+
+const CW_SCENARIO_MODES = [
+  "AUTO", "UNIVERSAL", "ROMANCE", "SLICE_OF_LIFE", "HORROR", "FANTASY", "SCI_FI",
+  "SUPERHERO", "CRIME", "MYSTERY", "SURVIVAL", "POLITICAL", "MILITARY", "WORKPLACE",
+  "SCHOOL", "FAMILY", "ADVENTURE", "COMEDY", "HISTORICAL", "SPORTS"
+];
+
+const CW_ROLE_CODES = [
+  "unknown", "stranger", "acquaintance", "friend", "best_friend", "family", "parent", "child",
+  "sibling", "relative", "romantic", "ex", "rival", "ally", "enemy", "mentor", "student",
+  "superior", "subordinate", "colleague", "teammate", "political", "professional"
+];
+const CW_FAMILY_ROLES = ["family", "parent", "child", "sibling", "relative"];
+const CW_PROFESSIONAL_ROLES = ["superior", "subordinate", "colleague", "professional", "mentor", "student", "teammate"];
+const CW_ROLE_INVERSE = {
+  friend: "friend", best_friend: "best_friend", family: "family", parent: "child", child: "parent",
+  sibling: "sibling", relative: "relative", romantic: "romantic", ex: "ex", rival: "rival", ally: "ally",
+  enemy: "enemy", mentor: "student", student: "mentor", superior: "subordinate", subordinate: "superior",
+  colleague: "colleague", teammate: "teammate", political: "political", professional: "professional",
+  acquaintance: "acquaintance", stranger: "stranger", unknown: "unknown"
+};
+
+const CW_SCENARIO_EVENT_CODES = [
+  "cooperation", "dependability", "competence_proven", "solidarity", "shared_duty", "mentorship", "guidance",
+  "mercy", "ideological_alignment", "ideological_conflict", "command_backed", "command_refused",
+  "resource_shared", "resource_denied", "secret_identity_revealed", "accusation", "suspicion_cleared",
+  "grief_support", "grief_blame", "professional_support", "credit_shared", "credit_stolen", "family_support",
+  "favoritism", "team_victory", "team_failure", "political_alliance", "public_scandal", "blackmail"
+];
+
+const CW_PROFILE_EVENT_CODES = {
+  UNIVERSAL: ["cooperation", "dependability", "competence_proven", "solidarity", "shared_duty", "mentorship", "guidance", "grief_support", "mercy"],
+  ROMANCE: ["flirtation", "confession", "relationship_defined", "mutual_reassurance", "commitment", "jealousy_episode"],
+  SLICE_OF_LIFE: ["quality_time", "warmth", "banter", "support", "family_support", "professional_support"],
+  HORROR: ["protection", "shared_trauma", "grief_support", "grief_blame", "suspicion", "accusation", "mercy"],
+  FANTASY: ["shared_duty", "dependability", "solidarity", "mentorship", "ideological_alignment", "ideological_conflict"],
+  SCI_FI: ["cooperation", "competence_proven", "shared_duty", "secret_identity_revealed", "ideological_conflict"],
+  SUPERHERO: ["secret_identity_revealed", "public_defense", "protection", "shared_duty", "ideological_conflict"],
+  CRIME: ["shared_secret", "loyalty", "deception", "betrayal", "blackmail", "accusation", "suspicion_cleared"],
+  MYSTERY: ["suspicion", "accusation", "suspicion_cleared", "honesty", "deception", "shared_secret"],
+  SURVIVAL: ["resource_shared", "resource_denied", "dependability", "protection", "rescue", "sacrifice", "solidarity"],
+  POLITICAL: ["political_alliance", "ideological_alignment", "ideological_conflict", "public_defense", "public_scandal", "betrayal"],
+  MILITARY: ["shared_duty", "command_backed", "command_refused", "dependability", "solidarity", "sacrifice"],
+  WORKPLACE: ["professional_support", "credit_shared", "credit_stolen", "competence_proven", "rivalry", "public_defense"],
+  SCHOOL: ["support", "admiration", "rivalry", "team_victory", "team_failure", "mentorship", "guidance"],
+  FAMILY: ["family_support", "favoritism", "support", "neglect", "forgiveness", "boundary_discussion", "shared_duty"],
+  ADVENTURE: ["cooperation", "dependability", "protection", "rescue", "shared_success", "shared_duty", "resource_shared"],
+  COMEDY: ["banter", "warmth", "quality_time", "conflict", "forgiveness", "public_rejection"],
+  HISTORICAL: ["shared_duty", "political_alliance", "public_defense", "loyalty", "ideological_conflict", "family_support"],
+  SPORTS: ["team_victory", "team_failure", "competence_proven", "rivalry", "professional_support", "solidarity", "dependability"]
+};
+
+const CW_PROFILE_DEFINITIONS = {
+  UNIVERSAL: { label: "Universal", clues: [], directive: "Follow the scenario's established genre, stakes and tone. Relationships should support the main story rather than replace it." },
+  ROMANCE: { label: "Romance", clues: ["romance", "romantic", "dating", "love interest", "boyfriend", "girlfriend", "husband", "wife", "crush", "courtship", "marriage", "fiance", "fiancée"], directive: "Let chemistry, communication, commitment, boundaries and incompatibility shape the plot without forcing attraction or reciprocation." },
+  SLICE_OF_LIFE: { label: "Slice of life", clues: ["slice of life", "roommate", "apartment", "cafe", "coffee shop", "bookstore", "neighborhood", "daily life", "flatmate"], directive: "Favor believable everyday follow-ups, routines, friendship, family, work and small changes; keep drama proportional to ordinary life." },
+  HORROR: { label: "Horror", clues: ["horror", "haunted", "ghost", "demon", "slasher", "eldritch", "curse", "cursed", "nightmare", "monster", "zombie", "vampire", "werewolf", "paranormal", "cult"], directive: "Let fear, uncertainty, trauma and dangerous choices pressure trust and loyalty. Do not deflate horror with constant soap-opera beats." },
+  FANTASY: { label: "Fantasy", clues: ["fantasy", "kingdom", "magic", "wizard", "mage", "dragon", "knight", "elf", "orc", "paladin", "warlock", "witch", "spell", "tavern", "guild", "sorcerer", "dungeons & dragons"], directive: "Use oaths, duty, rank, factions, kinship, quests and magical consequences as relationship pressure when established." },
+  SCI_FI: { label: "Science fiction", clues: ["science fiction", "sci-fi", "spaceship", "starship", "galaxy", "alien", "android", "cyberpunk", "space station", "colony", "robot", "orbital", "jedi", "sith", "lightsaber", "tardis", "time lord", "time travel"], directive: "Use mission duty, identity, technology, culture clashes, protocol and isolation to shape bonds without turning every scene into romance." },
+  SUPERHERO: { label: "Superhero", clues: ["superhero", "superheroine", "superpower", "superpowers", "villain", "secret identity", "masked hero", "metahuman", "mutant", "cape", "marvel", "dc comics", "avengers", "justice league", "vigilante"], directive: "Use secret identities, civilian risk, team trust, responsibility, public reputation and moral codes as social pressure." },
+  CRIME: { label: "Crime", clues: ["mafia", "mob", "gang", "cartel", "heist", "criminal", "underworld", "assassin", "thief", "smuggler", "crime family"], directive: "Use loyalty, leverage, secrecy, divided allegiances and consequences. Trust should be costly and betrayal should matter." },
+  MYSTERY: { label: "Mystery", clues: ["mystery", "detective", "investigation", "clue", "suspect", "alibi", "evidence", "murder case", "whodunit"], directive: "Let suspicion, testimony, withheld information and conflicting loyalties affect bonds, but never let relationship tags solve the mystery for the player." },
+  SURVIVAL: { label: "Survival", clues: ["survival", "stranded", "apocalypse", "post-apocalyptic", "post apocalyptic", "wasteland", "shelter", "supplies", "ration", "disaster", "wilderness", "infected"], directive: "Use resource choices, rescue priorities, competence, leadership and dependency to test trust and loyalty under pressure." },
+  POLITICAL: { label: "Political", clues: ["political", "election", "senator", "president", "parliament", "minister", "diplomat", "diplomacy", "campaign", "cabinet", "ambassador"], directive: "Use ideology, allegiance, reputation, public/private conflict, negotiation and faction pressure while preserving individual motives." },
+  MILITARY: { label: "Military", clues: ["military", "army", "soldier", "squad", "platoon", "commander", "commanding officer", "special forces", "marine", "navy", "air force", "barracks", "war zone"], directive: "Use chain of command, comradeship, duty, competence, sacrifice and moral disagreement. Do not mistake obedience for affection." },
+  WORKPLACE: { label: "Workplace", clues: ["workplace", "office", "coworker", "co-worker", "boss", "manager", "company", "promotion", "shift", "colleague", "employee", "hospital", "law firm", "retail", "store manager"], directive: "Use professional boundaries, hierarchy, collaboration, competition, reputation and career consequences. Romance should never be assumed from proximity." },
+  SCHOOL: { label: "School / campus", clues: ["school", "high school", "boarding school", "university", "college", "campus", "student", "teacher", "professor", "classroom", "dorm", "exam", "academy"], directive: "Use peer groups, belonging, mentorship, competition, friendship and authority dynamics. Adult-only mechanics remain strictly age-gated." },
+  FAMILY: { label: "Family", clues: ["family", "mother", "father", "sister", "brother", "sibling", "parent", "daughter", "son", "cousin", "grandmother", "grandfather"], directive: "Use shared history, obligation, favoritism, expectations, care and boundaries. Never romanticize a bond identified as family." },
+  ADVENTURE: { label: "Adventure", clues: ["adventure", "quest", "expedition", "treasure", "treasure hunt", "pirate", "ruins", "journey", "exploration", "dungeon", "artifact", "adventurer"], directive: "Use leadership, risk tolerance, promises, rescue, teamwork and competing goals to deepen relationships alongside the adventure." },
+  COMEDY: { label: "Comedy", clues: ["comedy", "sitcom", "comedic", "funny", "absurd", "ridiculous", "prank", "farce"], directive: "Use timing, banter, misunderstandings and social embarrassment without treating every joke as permanent emotional damage." },
+  HISTORICAL: { label: "Historical", clues: ["historical", "victorian", "regency", "edwardian", "1920s", "ancient rome", "roman empire", "ancient greece", "renaissance", "medieval court", "feudal", "western", "cowboy", "frontier", "historical fiction"], directive: "Respect established period pressures, duty, reputation, class and custom while preserving character agency and the scenario's own tone." },
+  SPORTS: { label: "Sports", clues: ["sports", "football team", "soccer team", "soccer", "rugby", "basketball", "baseball", "hockey", "boxing", "wrestling", "racing", "athlete", "coach", "championship", "league", "training camp"], directive: "Use teamwork, competition, performance pressure, leadership, mentorship and rivalry; do not equate intense team bonds with romance." }
+};
 
 const CW_TWISTS = [
   { id: "vulnerable_reveal", risk: 1, weight: 9, text: "A guarded character reveals a fear, insecurity, past mistake, private need, or difficult truth that changes the emotional temperature." },
@@ -188,7 +298,41 @@ const CW_TWISTS = [
   { id: "infidelity_suspicion", risk: 4, weight: 3, mature: true, romantic: true, infidelity: true, text: "Something creates a plausible suspicion of infidelity. Suspicion is not proof; let trust, evidence, and communication determine what follows." },
   { id: "parenthood_curveball", risk: 4, weight: 2, mature: true, parenthood: true, requiresIntimacy: true, text: "Only if established adult history makes it biologically and narratively plausible, introduce a pregnancy/parenthood possibility or discussion. Otherwise skip it entirely." },
   { id: "major_secret", risk: 4, weight: 2, curveball: true, text: "Reveal or threaten to reveal a major relationship-relevant secret that is compatible with established continuity. It must reshape choices, not rewrite a character's entire past from nowhere." },
-  { id: "wild_card", risk: 4, weight: 2, wildOnly: true, curveball: true, text: "Invent one surprising relationship-specific curveball grounded in the established cast and continuity. It can be romantic, painful, awkward, funny, socially explosive, or life-changing, but it must grow from existing relationships rather than random world lore." }
+  // Scenario-shaped twists. They only receive normal weight when the detected or
+  // manually selected scenario profile supports them.
+  { id: "fear_breaks_trust", risk: 2, weight: 6, profiles: ["HORROR", "SURVIVAL"], text: "Fear or exhaustion makes one character doubt another's judgment, honesty, or reliability. Keep the threat real and the conflict proportional to what they have endured." },
+  { id: "survivor_guilt", risk: 3, weight: 4, profiles: ["HORROR", "SURVIVAL", "MILITARY"], text: "Survivor guilt or responsibility for a loss strains a bond. Do not invent a death; use only losses or near-losses already supported by continuity." },
+  { id: "resource_choice", risk: 2, weight: 6, profiles: ["SURVIVAL", "ADVENTURE"], text: "A scarce resource, rescue priority, or limited safe option forces a revealing choice about trust, duty, fairness, or who gets protected first." },
+  { id: "leadership_challenge", risk: 2, weight: 6, profiles: ["SURVIVAL", "ADVENTURE", "MILITARY", "SPORTS"], text: "Someone challenges another character's leadership, plan, or right to decide. Make the disagreement about competence, values, or responsibility rather than random hostility." },
+  { id: "oath_vs_person", risk: 3, weight: 5, profiles: ["FANTASY", "HISTORICAL", "POLITICAL", "MILITARY"], text: "An oath, duty, office, faction, family expectation, or code conflicts with loyalty to a person. Neither side should be made obviously irrational just to create drama." },
+  { id: "faction_divide", risk: 3, weight: 5, profiles: ["FANTASY", "POLITICAL", "CRIME", "HISTORICAL"], text: "Two people are pulled toward opposing factions, houses, crews, parties, or loyalties. Let their established bond complicate the divide rather than erase it." },
+  { id: "magical_debt", risk: 2, weight: 4, profiles: ["FANTASY"], text: "A magical promise, curse, pact, prophecy, or supernatural obligation creates a relationship cost, but only if such forces already exist in the setting." },
+  { id: "mission_vs_bond", risk: 3, weight: 6, profiles: ["SCI_FI", "SUPERHERO", "MILITARY", "ADVENTURE"], text: "Mission success conflicts with protecting, trusting, or staying loyal to someone. Preserve the larger plot stakes instead of making the mission disappear for relationship drama." },
+  { id: "identity_question", risk: 2, weight: 4, profiles: ["SCI_FI", "SUPERHERO", "MYSTERY"], text: "A hidden identity, altered memory, duplicate, disguise, or uncertain truth makes a character question what they know about someone. Use only setting-supported possibilities." },
+  { id: "secret_identity_strain", risk: 2, weight: 6, profiles: ["SUPERHERO"], text: "A secret identity or double life creates missed commitments, suspicious behavior, danger, or an honesty dilemma. Do not reveal the secret unless continuity makes the reveal plausible." },
+  { id: "heroic_code_split", risk: 3, weight: 5, profiles: ["SUPERHERO", "ADVENTURE"], text: "Two allies disagree over methods, collateral risk, mercy, responsibility, or how far they are willing to go. Their respect and history should affect how the disagreement plays out." },
+  { id: "informant_suspicion", risk: 3, weight: 5, profiles: ["CRIME", "MYSTERY"], text: "Evidence suggests someone may be informing, withholding evidence, or playing both sides. Suspicion is not proof; let behavior and investigation determine the truth." },
+  { id: "leverage_changes_hands", risk: 3, weight: 4, profiles: ["CRIME", "POLITICAL", "MYSTERY"], text: "Sensitive information or leverage changes who has power in a relationship. Make the consequence social, strategic, or emotional rather than inventing unrelated lore." },
+  { id: "withheld_clue", risk: 2, weight: 6, profiles: ["MYSTERY", "CRIME"], text: "A character realizes someone withheld a clue, suspicion, or relevant fact. The reason could be protective, selfish, fearful, or strategic; do not decide guilt from the omission alone." },
+  { id: "suspect_someone_close", risk: 3, weight: 4, profiles: ["MYSTERY", "HORROR", "CRIME"], text: "A plausible clue puts suspicion on someone emotionally important. Keep evidence ambiguous enough that the mystery remains playable." },
+  { id: "public_private_split", risk: 2, weight: 6, profiles: ["POLITICAL", "HISTORICAL", "WORKPLACE", "SUPERHERO"], text: "A character must behave one way publicly and another privately because of reputation, office, rank, rules, or safety. Let the mismatch create believable relationship pressure." },
+  { id: "ideology_over_person", risk: 3, weight: 5, profiles: ["POLITICAL", "HISTORICAL", "MILITARY"], text: "A genuine ideological or moral disagreement tests whether respect and loyalty can survive incompatible principles." },
+  { id: "order_vs_loyalty", risk: 3, weight: 6, profiles: ["MILITARY"], text: "An order or mission requirement conflicts with loyalty to a teammate, subordinate, superior, or civilian. Do not make insubordination or obedience automatically correct." },
+  { id: "promotion_rift", risk: 2, weight: 5, profiles: ["MILITARY", "WORKPLACE", "SPORTS"], text: "Promotion, selection, rank, captaincy, or recognition changes the balance between two people and exposes pride, support, envy, or uncertainty." },
+  { id: "credit_dispute", risk: 2, weight: 6, profiles: ["WORKPLACE", "SCHOOL", "SPORTS"], text: "Credit, responsibility, recognition, or blame for a shared result becomes contested. Let professional or peer consequences matter." },
+  { id: "professional_boundary", risk: 2, weight: 6, profiles: ["WORKPLACE", "SCHOOL", "MILITARY"], text: "A professional, academic, or chain-of-command boundary needs clarification because closeness, favoritism, secrecy, or competing duties are affecting the relationship." },
+  { id: "peer_group_shift", risk: 2, weight: 6, profiles: ["SCHOOL", "SLICE_OF_LIFE", "SPORTS"], text: "A change in friend group, team status, social circle, or belonging alters who spends time together and who feels left out without requiring a romance plot." },
+  { id: "mentor_expectation", risk: 2, weight: 5, profiles: ["SCHOOL", "WORKPLACE", "SPORTS", "FANTASY"], text: "A mentor or authority figure's expectations become harder to meet, forcing a conversation about trust, independence, disappointment, or growth." },
+  { id: "old_family_wound", risk: 2, weight: 6, profiles: ["FAMILY", "SLICE_OF_LIFE"], familyOnly: true, text: "An old family pattern resurfaces through a current disagreement. Ground it in established history, expectations, favoritism, care, or boundaries rather than inventing melodrama from nowhere." },
+  { id: "family_expectation", risk: 2, weight: 6, profiles: ["FAMILY", "HISTORICAL"], familyOnly: true, text: "A family expectation about duty, independence, reputation, caregiving, tradition, or the future creates pressure on the bond." },
+  { id: "quiet_life_change", risk: 1, weight: 7, profiles: ["SLICE_OF_LIFE", "FAMILY", "WORKPLACE"], text: "A believable life change—new schedule, move, responsibility, friendship, hobby, or routine—quietly changes how much time or attention two people can give each other." },
+  { id: "harmless_social_disaster", risk: 1, weight: 7, profiles: ["COMEDY", "SLICE_OF_LIFE"], text: "A misunderstanding, bad timing, accidental remark, or social mistake creates comic awkwardness without permanently damaging the relationship unless later choices make it serious." },
+  { id: "accidental_matchmaking", risk: 1, weight: 4, profiles: ["COMEDY", "ROMANCE"], romantic: true, text: "Other characters misread or meddle in a possible attraction, creating awkward social pressure. Do not make either person reciprocate just because others assume they do." },
+  { id: "reputation_constraint", risk: 2, weight: 5, profiles: ["HISTORICAL", "POLITICAL", "FAMILY"], text: "Reputation, class, custom, family standing, or period expectations constrain what a character can safely say or do in public. Preserve agency within those pressures." },
+  { id: "team_role_conflict", risk: 2, weight: 6, profiles: ["SPORTS", "MILITARY", "ADVENTURE"], text: "Two people disagree over roles, leadership, playing time, tactics, responsibility, or who gets trusted in a high-pressure moment." },
+  { id: "performance_pressure", risk: 2, weight: 5, profiles: ["SPORTS", "SCHOOL", "WORKPLACE"], text: "Performance pressure makes support, blame, rivalry, confidence, or loyalty more visible. Do not reduce the character to a single win or failure." },
+
+  { id: "wild_card", risk: 4, weight: 2, wildOnly: true, curveball: true, text: "Invent one surprising relationship-specific curveball grounded in the established cast, scenario genre and continuity. It may be social, professional, familial, political, survival-driven, romantic, painful, funny, or life-changing, but it must grow from the current scenario rather than importing a different genre." }
 ];
 
 function CW_freshTwistState(old) {
@@ -213,6 +357,8 @@ function CW_init() {
   // because the script version changed.
   cw.npcs = cw.npcs && typeof cw.npcs === "object" ? cw.npcs : {};
   cw.aliases = cw.aliases && typeof cw.aliases === "object" ? cw.aliases : {};
+  cw.roles = cw.roles && typeof cw.roles === "object" ? cw.roles : {};
+  cw.scenario = cw.scenario && typeof cw.scenario === "object" ? cw.scenario : { primary: "UNIVERSAL", secondary: "", confidence: 0, turn: -1 };
   cw.ledger = Array.isArray(cw.ledger) ? cw.ledger : [];
   cw.sightings = Array.isArray(cw.sightings) ? cw.sightings : [];
   cw.command = cw.command || null;
@@ -303,7 +449,7 @@ function CW_recentHistoryText(limit) {
 }
 
 const CW_CONFIG_TITLE = "Crossed Wires Config";
-const CW_CONFIG_MARKER = "CWCFG5";
+const CW_CONFIG_MARKER = "CWCFG6";
 
 function CW_cardKeysText(card) {
   if (!card) return "";
@@ -344,6 +490,12 @@ function CW_defaultConfigEntryFrom(cfg) {
     "Active Bonds: " + c.maxContextRelationships,
     "Memory Anchors: " + c.memoryAnchors,
     "",
+    "[Adaptation]",
+    "Scenario Mode: " + c.scenarioMode,
+    "Adaptation Strength: " + c.adaptationStrength,
+    "Role Awareness: " + (c.roleAwareness ? "ON" : "OFF"),
+    "Scenario Twists: " + (c.enableScenarioTwists ? "ON" : "OFF"),
+    "",
     "[Drama & Twists]",
     "Twist Mode: " + c.twistMode,
     "Twist Chance: " + (c.twistChancePercent < 0 ? "AUTO" : c.twistChancePercent),
@@ -379,7 +531,7 @@ function CW_defaultConfigEntry() {
 
 function CW_configNotes() {
   return [
-    "Crossed Wires v5 — configuration guide",
+    "Crossed Wires v6 — configuration guide",
     "",
     "Edit values in Entry. These Notes are player-facing reference text and are not intended as narrator context.",
     "",
@@ -393,9 +545,15 @@ function CW_configNotes() {
     "• Active Bonds — Maximum scene-relevant directional relationships included in Crossed Wires context at once. 1–12. Lower saves context; higher suits large ensemble scenes.",
     "• Memory Anchors — Number of older major turning points retained in each active bond summary in addition to the newest memory. 0–3. Higher improves long-term continuity but uses more context.",
     "",
+    "ADAPTATION",
+    "• Scenario Mode — AUTO lets Crossed Wires infer the current scenario from plot context, recent story, Story Cards and placeholders. Manual options: UNIVERSAL, ROMANCE, SLICE_OF_LIFE, HORROR, FANTASY, SCI_FI, SUPERHERO, CRIME, MYSTERY, SURVIVAL, POLITICAL, MILITARY, WORKPLACE, SCHOOL, FAMILY, ADVENTURE, COMEDY, HISTORICAL, SPORTS.",
+    "• Adaptation Strength — LIGHT, BALANCED, FULL. Controls how strongly the detected scenario profile changes twist weighting, event vocabulary and private guidance. LIGHT keeps behavior closest to the universal relationship engine; FULL adapts aggressively without overriding story continuity.",
+    "• Role Awareness — ON lets the narrator classify established bonds such as friend, family, rival, teammate, mentor/student, superior/subordinate, colleague, ally/enemy, romantic/ex and professional. Roles guide twists and prevent mismatched assumptions such as romanticizing family bonds or treating military obedience as affection.",
+    "• Scenario Twists — ON enables genre-shaped relationship complications such as chain-of-command conflicts, horror suspicion, survival resource choices, workplace credit disputes, superhero secret-identity strain, fantasy oath conflicts and family expectations. OFF keeps only universal relationship twists.",
+    "",
     "DRAMA & TWISTS",
     "• Twist Mode — OFF, GROUNDED, DRAMATIC, WILD, UNHINGED. Controls natural twist frequency and the maximum risk of automatic relationship twists.",
-    "• Twist Chance — AUTO uses the selected Twist Mode. Or enter 0–60 for an exact percentage whenever a twist roll is eligible.",
+    "• Twist Chance — AUTO starts from the selected Twist Mode and, when adaptation is active, scales frequency to the current scenario so action/horror/survival plots get more breathing room than romance or slice-of-life. Or enter 0–60 for an exact unscaled percentage whenever a twist roll is eligible.",
     "• Twists Start After — Earliest adventure turn automatic twists may begin. 0–100.",
     "• Twist Cooldown — Minimum turns between general twist seeds. 2–30.",
     "• Curveballs — ON permits continuity-safe major-secret and wild-card twists. OFF keeps more structured relationship twists only.",
@@ -424,7 +582,7 @@ function CW_configNotes() {
     "Major betrayal, abandonment and boundary damage now creates durable scars. A normal apology or forgiveness lowers immediate heat but does not erase those scars. The narrator must observe concrete repair before trust repair, boundary repair or abandonment repair can reduce them.",
     "",
     "COMMANDS",
-    "!wire NAME • !wires • !wiretwists • !wirestatus • !wireforget NAME • !spark [small|medium|major] • !wirehelp",
+    "!wire NAME • !wires • !wiretwists • !wirestatus • !wireprofile • !wireforget NAME • !spark [small|medium|major] • !wirehelp",
     "",
     "Internal format marker: " + CW_CONFIG_MARKER
   ].join("\n");
@@ -466,6 +624,12 @@ function CW_configFromEntry(entry) {
   cfg.observationAppearances = CW_readNumber(map["OBSERVATION APPEARANCES"], cfg.observationAppearances, 1, 8);
   cfg.maxContextRelationships = CW_readNumber(map["ACTIVE BONDS"], cfg.maxContextRelationships, 1, 12);
   cfg.memoryAnchors = CW_readNumber(map["MEMORY ANCHORS"], cfg.memoryAnchors, 0, 3);
+  cfg.scenarioMode = String(map["SCENARIO MODE"] || cfg.scenarioMode).trim().toUpperCase().replace(/[ -]+/g, "_");
+  if (!CW_SCENARIO_MODES.includes(cfg.scenarioMode)) cfg.scenarioMode = "AUTO";
+  cfg.adaptationStrength = String(map["ADAPTATION STRENGTH"] || cfg.adaptationStrength).trim().toUpperCase();
+  if (!["LIGHT", "BALANCED", "FULL"].includes(cfg.adaptationStrength)) cfg.adaptationStrength = "FULL";
+  cfg.roleAwareness = CW_parseBool(map["ROLE AWARENESS"], cfg.roleAwareness);
+  cfg.enableScenarioTwists = CW_parseBool(map["SCENARIO TWISTS"], cfg.enableScenarioTwists);
   cfg.sceneHistoryActions = CW_readNumber(map["SCENE HISTORY"], cfg.sceneHistoryActions, 2, 10);
   cfg.contextBudgetChars = CW_readNumber(map["CONTEXT BUDGET"], cfg.contextBudgetChars, 2400, 8000);
 
@@ -525,14 +689,14 @@ function CW_upgradeConfigCard(card) {
   if (!card) return;
   const notes = String(card.description || card.notes || "");
   const cleanIdentity = String(card.title || card.name || "") === CW_CONFIG_TITLE && !CW_cardKeysText(card).includes("__crossed_wires_config__");
-  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 5) return;
+  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 6) return;
   if (cleanIdentity && notes.includes(CW_CONFIG_MARKER)) {
-    if (state.crossedWires) state.crossedWires.configCardVersion = 5;
+    if (state.crossedWires) state.crossedWires.configCardVersion = 6;
     return;
   }
   const migrated = CW_configFromEntry(card.entry);
   CW_writeConfigCard(card, migrated);
-  if (state.crossedWires) state.crossedWires.configCardVersion = 5;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 6;
 }
 
 function CW_ensureConfigCard() {
@@ -585,13 +749,109 @@ function CW_ensureConfigCard() {
   card.name = CW_CONFIG_TITLE;
   card.description = notes;
   card.notes = notes;
-  if (state.crossedWires) state.crossedWires.configCardVersion = 5;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 6;
   return card;
 }
 
 function CW_config() {
   const card = CW_configCard();
   return card && card.entry ? CW_configFromEntry(card.entry) : Object.assign({}, CW_DEFAULT_CONFIG);
+}
+
+function CW_profileCorpus(baseContext) {
+  const parts = [];
+  const base = String(baseContext || "");
+  const recent = CW_recentHistoryText(8);
+  if (base) parts.push(base.slice(-24000));
+  parts.push(recent);
+
+  // Only use Story Cards that appear relevant to the live scene/context. Scanning
+  // an entire 5000-card world database would let unused lore drown out the
+  // scenario actually being played.
+  const liveText = (base + "\n" + recent).toLowerCase();
+  const configCard = CW_configCard();
+  if (typeof storyCards !== "undefined" && Array.isArray(storyCards)) {
+    let included = 0;
+    for (let i = 0; i < storyCards.length && included < 30; i++) {
+      const c = storyCards[i];
+      if (!c || c === configCard) continue;
+      const title = String(c.title || c.name || "").trim();
+      const keys = CW_cardKeysText(c).split(/[,;]/).map(function (x) { return x.trim(); }).filter(Boolean);
+      const signals = [title].concat(keys).filter(Boolean);
+      const relevant = signals.some(function (signal) { return signal.length >= 3 && liveText.indexOf(signal.toLowerCase()) >= 0; });
+      if (!relevant) continue;
+      parts.push(title, String(c.type || ""), String(c.entry || "").slice(0, 700));
+      included++;
+    }
+  }
+  const ph = (typeof placeholders !== "undefined" && Array.isArray(placeholders))
+    ? placeholders
+    : ((state && Array.isArray(state.placeholders)) ? state.placeholders : []);
+  for (const p of ph) parts.push(String((p && p.question) || ""), String((p && p.answer) || ""));
+  return parts.join("\n").toLowerCase().slice(-50000);
+}
+
+function CW_countPhrase(text, phrase) {
+  const p = String(phrase || "").toLowerCase();
+  if (!p) return 0;
+  let pos = 0, count = 0;
+  while ((pos = text.indexOf(p, pos)) >= 0 && count < 6) { count++; pos += p.length; }
+  return count;
+}
+
+function CW_detectScenarioProfile(baseContext, cfg) {
+  const c = cfg || CW_config();
+  if (c.scenarioMode && c.scenarioMode !== "AUTO") {
+    const explicit = { primary: c.scenarioMode, secondary: "", confidence: 100, manual: true, turn: CW_turn(), candidates: [{ mode: c.scenarioMode, score: 100 }] };
+    state.crossedWires.scenario = explicit;
+    return explicit;
+  }
+  const corpus = CW_profileCorpus(baseContext);
+  const scored = [];
+  for (const mode of CW_SCENARIO_MODES) {
+    if (mode === "AUTO" || mode === "UNIVERSAL") continue;
+    const def = CW_PROFILE_DEFINITIONS[mode];
+    let score = 0;
+    for (const clue of (def.clues || [])) {
+      const hits = CW_countPhrase(corpus, clue);
+      if (hits) score += hits * (clue.indexOf(" ") >= 0 ? 3 : 2);
+    }
+    scored.push({ mode: mode, score: score });
+  }
+  scored.sort(function (a, b) { return b.score - a.score; });
+  const top = scored[0] || { mode: "UNIVERSAL", score: 0 };
+  const second = scored[1] || { mode: "", score: 0 };
+  let primary = top.score >= 4 ? top.mode : "UNIVERSAL";
+  let secondary = "";
+  if (primary !== "UNIVERSAL" && second.score >= 4 && second.score >= top.score * 0.55) secondary = second.mode;
+  const confidence = primary === "UNIVERSAL" ? Math.min(40, top.score * 8) : Math.min(99, 45 + top.score * 5);
+  const result = { primary: primary, secondary: secondary, confidence: confidence, manual: false, turn: CW_turn(), candidates: scored.slice(0, 5) };
+  state.crossedWires.scenario = result;
+  return result;
+}
+
+function CW_currentScenarioProfile() {
+  const s = state.crossedWires && state.crossedWires.scenario;
+  return s && s.primary ? s : { primary: "UNIVERSAL", secondary: "", confidence: 0, manual: false, turn: -1 };
+}
+
+function CW_profileDirective(profile, cfg) {
+  const p = profile || CW_currentScenarioProfile();
+  const modes = [p.primary, p.secondary].filter(Boolean);
+  const bits = modes.map(function (m) { return CW_PROFILE_DEFINITIONS[m] ? CW_PROFILE_DEFINITIONS[m].directive : ""; }).filter(Boolean);
+  if (!bits.length) bits.push(CW_PROFILE_DEFINITIONS.UNIVERSAL.directive);
+  const strength = (cfg || CW_config()).adaptationStrength;
+  const prefix = strength === "LIGHT" ? "Light adaptation: " : (strength === "BALANCED" ? "Scenario adaptation: " : "Strong scenario adaptation: ");
+  return prefix + bits.join(" Secondary influence: ");
+}
+
+function CW_profileEventCodes(profile) {
+  const p = profile || CW_currentScenarioProfile();
+  const out = [];
+  [p.primary, p.secondary].filter(Boolean).forEach(function (m) {
+    (CW_PROFILE_EVENT_CODES[m] || []).forEach(function (e) { if (CW_EVENT_EFFECTS[e] && !out.includes(e)) out.push(e); });
+  });
+  return out;
 }
 
 function CW_explicitAgeStatus(value) {
@@ -707,6 +967,18 @@ function CW_mergeNpcAlias(aliasKey, canonicalKey, canonicalName) {
     if (CW_key(e.to) === aliasKey) e.to = target && target.name ? target.name : canonicalName;
   }
 
+  const rebuiltRoles = {};
+  for (const rk in cw.roles) {
+    const bits = rk.split("->");
+    if (bits.length !== 2) continue;
+    const rf = bits[0] === aliasKey ? canonicalKey : bits[0];
+    const rt = bits[1] === aliasKey ? canonicalKey : bits[1];
+    const nk = rf + "->" + rt;
+    const prior = rebuiltRoles[nk];
+    if (!prior || Number((cw.roles[rk] || {}).turn || 0) >= Number(prior.turn || 0)) rebuiltRoles[nk] = cw.roles[rk];
+  }
+  cw.roles = rebuiltRoles;
+
   for (const sighting of cw.sightings) if (sighting && sighting.key === aliasKey) sighting.key = canonicalKey;
   const dedupe = {};
   cw.sightings = cw.sightings.filter(function (x) {
@@ -738,6 +1010,44 @@ function CW_resolveNpcName(name) {
   const canonicalKey = CW_resolveNpcKey(clean);
   const npc = state.crossedWires.npcs[canonicalKey];
   return npc && npc.name ? npc.name : clean;
+}
+
+function CW_roleKey(from, to) {
+  const f = CW_key(CW_resolveNpcName(from));
+  const t = CW_key(to) === "you" ? "you" : CW_key(CW_resolveNpcName(to));
+  return f + "->" + t;
+}
+
+function CW_getRole(from, to) {
+  const rec = state.crossedWires.roles[CW_roleKey(from, to)];
+  return rec && CW_ROLE_CODES.includes(rec.role) ? rec.role : "unknown";
+}
+
+function CW_setRole(from, to, role, turn) {
+  const cfg = CW_config();
+  if (!cfg.roleAwareness) return false;
+  const fromName = CW_resolveNpcName(from);
+  const toName = CW_key(to) === "you" ? "YOU" : CW_resolveNpcName(to);
+  const r = String(role || "").toLowerCase();
+  if (!fromName || CW_isPlayerName(fromName) || !toName || !CW_ROLE_CODES.includes(r)) return false;
+  if (!cfg.enableNpcNpc && toName !== "YOU") return false;
+  if (CW_key(fromName) === CW_key(toName)) return false;
+  CW_registerNpc(fromName, turn);
+  if (toName !== "YOU") CW_registerNpc(toName, turn);
+  state.crossedWires.roles[CW_roleKey(fromName, toName)] = { role: r, turn: Number(turn) || 0 };
+  // Populate the inverse for NPC↔NPC relationships when the role has a stable inverse.
+  if (toName !== "YOU" && CW_ROLE_INVERSE[r]) {
+    state.crossedWires.roles[CW_roleKey(toName, fromName)] = { role: CW_ROLE_INVERSE[r], turn: Number(turn) || 0 };
+  }
+  return true;
+}
+
+function CW_roleDisplay(role) {
+  return String(role || "unknown").replace(/_/g, " ");
+}
+
+function CW_isFamilyRole(role) {
+  return CW_FAMILY_ROLES.includes(String(role || "").toLowerCase());
 }
 
 function CW_noteSighting(key, turn) {
@@ -837,6 +1147,8 @@ function CW_handleUndo(turn) {
       npc.lastSeen = npc.lastMentionTurn;
     }
     for (const alias in cw.aliases) if (!cw.npcs[cw.aliases[alias]]) delete cw.aliases[alias];
+    for (const rk in cw.roles) if (Number((cw.roles[rk] || {}).turn || 0) > turn) delete cw.roles[rk];
+    if (cw.scenario && Number(cw.scenario.turn || -1) > turn) cw.scenario = { primary: "UNIVERSAL", secondary: "", confidence: 0, turn: turn };
 
     cw.twist.history = cw.twist.history.filter(function (t) { return (t.turn || 0) <= turn; });
     if (cw.twist.pending && (cw.twist.pending.armedAt || 0) > turn) cw.twist.pending = null;
@@ -1300,13 +1612,38 @@ function CW_rand() {
 function CW_twistChance(cfg) {
   const modeBase = { OFF: 0, GROUNDED: 6, DRAMATIC: 10, WILD: 14, UNHINGED: 22 };
   const base = modeBase[cfg.twistMode] || 0;
-  const chosen = cfg.twistChancePercent < 0 ? base : cfg.twistChancePercent;
-  return Math.max(0, Math.min(60, chosen));
+  if (cfg.twistChancePercent >= 0) return Math.max(0, Math.min(60, cfg.twistChancePercent));
+  const p = CW_currentScenarioProfile().primary || "UNIVERSAL";
+  const factors = {
+    UNIVERSAL: 1.0, ROMANCE: 1.15, SLICE_OF_LIFE: 1.0, FAMILY: 1.0, COMEDY: 0.95,
+    WORKPLACE: 0.9, SCHOOL: 0.9, SPORTS: 0.82, SUPERHERO: 0.82, FANTASY: 0.8,
+    SCI_FI: 0.78, POLITICAL: 0.78, CRIME: 0.76, HISTORICAL: 0.8, ADVENTURE: 0.74,
+    MYSTERY: 0.72, SURVIVAL: 0.68, HORROR: 0.66, MILITARY: 0.68
+  };
+  const target = factors[p] == null ? 1 : factors[p];
+  const blend = cfg.adaptationStrength === "LIGHT" ? 0.35 : (cfg.adaptationStrength === "BALANCED" ? 0.65 : 1);
+  const factor = 1 + (target - 1) * blend;
+  return Math.max(0, Math.min(60, Math.round(base * factor)));
 }
 
 function CW_twistRisk(id) {
   const t = CW_TWISTS.find(function (x) { return x.id === id; });
   return t ? (t.risk || 2) : 2;
+}
+
+function CW_twistProfileFactor(t, profile, cfg) {
+  const p = profile || CW_currentScenarioProfile();
+  const strength = cfg.adaptationStrength || "FULL";
+  if (Array.isArray(t.profiles) && t.profiles.length) {
+    if (!cfg.enableScenarioTwists) return 0;
+    if (t.profiles.includes(p.primary)) return strength === "LIGHT" ? 1.25 : (strength === "BALANCED" ? 1.6 : 2.0);
+    if (p.secondary && t.profiles.includes(p.secondary)) return strength === "LIGHT" ? 1.1 : (strength === "BALANCED" ? 1.35 : 1.6);
+    return strength === "LIGHT" ? 0.5 : (strength === "BALANCED" ? 0.12 : 0);
+  }
+  if (t.romantic && !["ROMANCE", "SLICE_OF_LIFE", "COMEDY"].includes(p.primary)) {
+    return strength === "FULL" ? 0.55 : 0.8;
+  }
+  return 1;
 }
 
 function CW_twistCandidates(link, cfg, turn, forcedTier) {
@@ -1315,11 +1652,16 @@ function CW_twistCandidates(link, cfg, turn, forcedTier) {
   const maxRisk = requestedRisk || defaultMax;
   const minRisk = requestedRisk === 4 ? 3 : (requestedRisk || 1);
   const tw = state.crossedWires.twist;
+  const profile = CW_currentScenarioProfile();
+  const role = CW_getRole(link.from, link.to);
 
   return CW_TWISTS.filter(function (t) {
     const risk = t.risk || 2;
     if (risk > maxRisk || risk < minRisk) return false;
     if (t.romantic && !cfg.enableRomance) return false;
+    if (t.romantic && CW_isFamilyRole(role)) return false;
+    if (t.familyOnly && !CW_isFamilyRole(role)) return false;
+    if (Array.isArray(t.profiles) && t.profiles.length && CW_twistProfileFactor(t, profile, cfg) <= 0) return false;
     if (t.mature && (!cfg.enableMatureThemes || !CW_pairAdults(link.from, link.to))) return false;
     if (t.mature && ["adult_intimacy_shift", "morning_after", "casual_vs_serious"].includes(t.id) && !cfg.enableAdultIntimacy) return false;
     if (t.infidelity && !cfg.enableInfidelity) return false;
@@ -1351,7 +1693,11 @@ function CW_twistCandidates(link, cfg, turn, forcedTier) {
     return true;
   }).map(function (t) {
     let weight = t.weight || 1;
-    if (cfg.twistMode === "UNHINGED" && t.id === "wild_card") weight = 11;
+    weight *= CW_twistProfileFactor(t, profile, cfg);
+    if (CW_PROFESSIONAL_ROLES.includes(role) && t.romantic && !link.flags.defined && link.scores.attraction < 30) weight *= 0.35;
+    if (["romantic", "ex"].includes(role) && t.romantic) weight *= 1.6;
+    if (["rival", "enemy"].includes(role) && ["rivalry_shift", "loyalty_test", "public_choice"].includes(t.id)) weight *= 1.5;
+    if (cfg.twistMode === "UNHINGED" && t.id === "wild_card") weight = Math.max(weight, 11);
     if (link.trajectory === "volatile" && (t.risk || 2) >= 2) weight += 2;
     if (link.unresolved && ["reconciliation_window", "boundary_talk", "define_the_relationship"].includes(t.id)) weight += 2;
     return Object.assign({}, t, { weight: weight });
@@ -1443,6 +1789,7 @@ function CW_maybeArmTwist(turn) {
     from: link.from,
     to: link.to,
     pairKey: pairKey,
+    profile: CW_currentScenarioProfile().primary || "UNIVERSAL",
     armedAt: turn,
     forced: forced
   };
@@ -1460,7 +1807,7 @@ function CW_twistPrompt(turn) {
   const p = CW_maybeArmTwist(turn);
   if (!p) return "";
   return [
-    "OPTIONAL RELATIONSHIP TWIST (risk " + p.risk + ") for " + p.from + " ↔ " + p.to + ": " + p.text,
+    "OPTIONAL SCENARIO-AWARE RELATIONSHIP PRESSURE [" + (p.profile || "UNIVERSAL") + "] (risk " + p.risk + ") for " + p.from + " ↔ " + p.to + ": " + p.text,
     "Treat this as pressure, not predetermined canon. Use it only if continuity and the current scene support it. Never force the player character's feelings/actions/consent. If used in visible prose, append [[CW_TWIST|" + p.token + "|USED]] at the end; otherwise omit the tag."
   ].join("\n");
 }
@@ -1519,7 +1866,8 @@ function CW_anchorText(link, cfg) {
 function CW_relationshipContextLine(link, turn) {
   const cfg = CW_config();
   const last = link.memories.length ? link.memories[link.memories.length - 1] : null;
-  let line = "- " + link.from + " → " + link.to + ": " + CW_label(link.scores, link.familiarity, link.flags) +
+  const role = CW_getRole(link.from, link.to);
+  let line = "- " + link.from + " → " + link.to + (role !== "unknown" ? " [" + CW_roleDisplay(role) + "]" : "") + ": " + CW_label(link.scores, link.familiarity, link.flags) +
     "; " + CW_pressureText(link.scores) + "; trajectory " + link.trajectory + ".";
   if (link.flags.betrayalScars || link.flags.abandonmentScars || link.flags.boundaryScars) line += " Durable relationship damage remains and requires earned repair.";
   if (link.unresolved) line += " Unresolved: " + link.unresolved + ".";
@@ -1534,7 +1882,8 @@ function CW_relationshipContextLine(link, turn) {
   return CW_clipText(line, 470);
 }
 
-function CW_allowedEventCodes(cfg) {
+function CW_allowedEventCodes(cfg, profile) {
+  const scenarioPreferred = CW_profileEventCodes(profile);
   return Object.keys(CW_EVENT_EFFECTS).filter(function (kind) {
     if (!cfg.enableRomance && CW_ROMANCE_EVENTS.includes(kind)) return false;
     if (!cfg.enableMatureThemes && CW_MATURE_EVENTS.includes(kind)) return false;
@@ -1543,12 +1892,13 @@ function CW_allowedEventCodes(cfg) {
     if (!cfg.enableBreakups && kind === "breakup") return false;
     if (!cfg.enableParenthoodThemes && kind === "parenthood_news") return false;
     if (!cfg.enableToxicDrama && CW_TOXIC_EVENTS.includes(kind)) return false;
+    if (cfg.adaptationStrength !== "LIGHT" && CW_SCENARIO_EVENT_CODES.includes(kind) && !scenarioPreferred.includes(kind) && !(CW_PROFILE_EVENT_CODES.UNIVERSAL || []).includes(kind)) return false;
     return true;
   });
 }
 
-function CW_coreEventCodes(cfg) {
-  const allowed = CW_allowedEventCodes(cfg);
+function CW_coreEventCodes(cfg, profile) {
+  const allowed = CW_allowedEventCodes(cfg, profile);
   const preferred = [
     "warmth", "support", "empathy", "honesty", "vulnerability", "admiration", "protection",
     "flirtation", "confession", "relationship_defined", "commitment", "kept_promise", "rescue",
@@ -1557,7 +1907,9 @@ function CW_coreEventCodes(cfg) {
     "rejection", "breakup", "abandonment", "boundary_violated", "manipulation",
     "adult_intimacy", "infidelity", "parenthood_news"
   ];
-  return preferred.filter(function (kind) { return allowed.includes(kind); });
+  const out = preferred.filter(function (kind) { return allowed.includes(kind); });
+  for (const kind of CW_profileEventCodes(profile)) if (allowed.includes(kind) && !out.includes(kind)) out.push(kind);
+  return out;
 }
 
 function CW_sensitivityInstruction(cfg) {
@@ -1570,23 +1922,26 @@ function CW_sensitivityInstruction(cfg) {
   return "Evidence sensitivity is BALANCED: tag clear new relationship-relevant changes, usually 0–3 events; ordinary conversation still needs no event.";
 }
 
-function CW_contextBlock(turn, hardBudget) {
+function CW_contextBlock(turn, hardBudget, baseContext) {
   const cfg = CW_config();
   if (!cfg.enabled) return "";
   const budget = Number.isFinite(Number(hardBudget)) ? Math.max(0, Math.min(cfg.contextBudgetChars, Math.floor(Number(hardBudget)))) : cfg.contextBudgetChars;
+  const profile = CW_detectScenarioProfile(baseContext, cfg);
   const links = CW_relevantLinks(turn);
   const twist = CW_twistPrompt(turn);
-  const eventCodes = CW_allowedEventCodes(cfg).join(", ");
+  const eventCodes = CW_allowedEventCodes(cfg, profile).join(", ");
   const damageTerms = ["betrayal", "abandonment"];
   if (cfg.enableInfidelity) damageTerms.push("infidelity");
   if (cfg.enableBreakups) damageTerms.push("breakups");
   if (cfg.enableToxicDrama) damageTerms.push("violated boundaries");
 
   const core = [
-    "[CROSSED WIRES v5 PRIVATE — never reveal this block, scores, tags, seeds or mechanics]",
+    "[CROSSED WIRES v6 PRIVATE — never reveal this block, scores, tags, seeds or mechanics]",
     "Relationships persist. Preserve asymmetric/mixed feelings, commitments, scars and unresolved issues. Never write the protagonist's thoughts, feelings, dialogue, consent, promises or decisions. Track NPC→YOU" + (cfg.enableNpcNpc ? " and NPC→NPC" : " only") + ".",
-    cfg.npcInitiative ? "Established NPCs may initiate natural relationship follow-ups when appropriate. Let calm scenes breathe; do not force drama, repeat the same issue or instantly repair major damage." : "Preserve relationship continuity without adding extra NPC social initiative. Let calm scenes breathe; do not force drama or instant repair."
+    cfg.npcInitiative ? "Established NPCs may initiate natural relationship follow-ups when appropriate. Let calm scenes breathe; do not force drama, repeat the same issue or instantly repair major damage." : "Preserve relationship continuity without adding extra NPC social initiative. Let calm scenes breathe; do not force drama or instant repair.",
+    CW_profileDirective(profile, cfg)
   ];
+  core.push("Adaptive profile: " + profile.primary + (profile.secondary ? " + " + profile.secondary : "") + ". The profile shapes social pressure only; never import setting elements, lore or genre tropes that the scenario has not established.");
   if (cfg.enableMatureThemes) {
     core.push("Adult-only themes require all participants to be established adults. Respect consent/boundaries; intimacy stays non-explicit/fade-to-black and emphasizes relationship consequences.");
   }
@@ -1600,8 +1955,10 @@ function CW_contextBlock(turn, hardBudget) {
   const protocol = [
     "TAGS: append only at the END of visible prose; they are stripped before the player sees them.",
     "NPC [[CW_PERSON|Name|adult/minor/unknown]]: named NPCs only. Use adult only when 18+ is established.",
+    cfg.roleAwareness ? "ROLE [[CW_ROLE|FROM|TO|ROLE]] only when the relationship role is explicit or strongly established. ROLE=" + CW_ROLE_CODES.join(",") + ". Family roles must never be romanticized." : "",
     "EVENT [[CW_EVT|FROM|TO|TYPE|SEVERITY|brief factual memory]]. FROM = NPC whose bond changes, not necessarily the actor; TO = person they react toward; FROM is never YOU. Example: YOU betray Mara → Mara|YOU|betrayal. Severity 1 small, 2 meaningful, 3 major/lasting.",
     CW_sensitivityInstruction(cfg),
+    cfg.enableRomance ? "Romance codes such as flirtation, date_or_courtship, confession, relationship_defined, exclusivity, commitment, proposal and marriage require explicitly romantic relationship evidence. Do not use them for mission commitment, testimony, ordinary secrets, teamwork or duty." : "",
     "TYPE=" + eventCodes.replace(/, /g, ","),
     "Max " + cfg.maxEventsPerTurn + " events. New story-supported evidence only: no routine talk, recalled old incidents, repeated updates or unsupported private feelings. Memory note: factual, <=150 chars, no | or ].",
     "trust_repair/boundary_repair/abandonment_repair require demonstrated rebuilding, not one apology or instant forgiveness.",
@@ -1614,7 +1971,7 @@ function CW_contextBlock(turn, hardBudget) {
     if (budget < 900) {
       const closing = "\n[/CROSSED WIRES]";
       const microBody = [
-        "[CROSSED WIRES v5 PRIVATE] Preserve active NPC relationship continuity, mixed feelings, agency and consequences. Never decide the protagonist's thoughts/feelings/actions/consent; do not force drama.",
+        "[CROSSED WIRES v6 PRIVATE] Profile " + profile.primary + (profile.secondary ? "+" + profile.secondary : "") + ". Preserve active NPC relationship continuity, mixed feelings, agency and consequences. Never decide the protagonist's thoughts/feelings/actions/consent; do not force drama.",
         relationshipLines.length > 1 ? relationshipLines[1] : relationshipLines[0]
       ].filter(Boolean).join("\n");
       const available = Math.max(0, budget - closing.length - 2);
@@ -1622,13 +1979,13 @@ function CW_contextBlock(turn, hardBudget) {
       return "\n\n" + clipped + closing;
     }
 
-    const lowCodes = CW_coreEventCodes(cfg).join(",");
+    const lowCodes = CW_coreEventCodes(cfg, profile).join(",");
     const lowProtocol = [
-      "[CROSSED WIRES v5 PRIVATE] Preserve NPC relationship continuity/mixed feelings; never decide protagonist thoughts, feelings, actions or consent; do not force drama or instant repair.",
+      "[CROSSED WIRES v6 PRIVATE] Profile " + profile.primary + (profile.secondary ? "+" + profile.secondary : "") + ". Preserve NPC relationship continuity/mixed feelings; never decide protagonist thoughts, feelings, actions or consent; do not force drama or instant repair.",
       relationshipLines.length > 1 ? relationshipLines[1] : relationshipLines[0],
       twistLines.length ? CW_clipText(twistLines[0], 220) : "",
-      "Hidden tags at END only. NPC [[CW_PERSON|Name|adult/minor/unknown]]. EVENT [[CW_EVT|FROM|TO|TYPE|1/2/3|brief memory]]. FROM is the NPC whose bond changes; TO is who they react toward; never FROM=YOU.",
-      "TYPE=" + lowCodes + ". New evidence only; ordinary talk/recalled events need no tag. Repair tags require demonstrated rebuilding.",
+      "Hidden tags at END only. NPC [[CW_PERSON|Name|adult/minor/unknown]]. " + (cfg.roleAwareness ? "ROLE [[CW_ROLE|FROM|TO|ROLE]]. " : "") + "EVENT [[CW_EVT|FROM|TO|TYPE|1/2/3|brief memory]]. FROM is the NPC whose bond changes; TO is who they react toward; never FROM=YOU.",
+      (cfg.enableRomance ? "Romance codes require explicitly romantic evidence; mission/team/family commitment is not romantic commitment. " : "") + "TYPE=" + lowCodes + ". New evidence only; ordinary talk/recalled events need no tag. Repair tags require demonstrated rebuilding.",
       "[/CROSSED WIRES]"
     ].filter(Boolean).join("\n");
     if (lowProtocol.length > budget) {
@@ -1655,8 +2012,9 @@ function CW_contextBlock(turn, hardBudget) {
   }
   if (result.length > budget) {
     const compactCore = [
-      "[CROSSED WIRES v5 — PRIVATE]",
-      "Preserve directional NPC relationship continuity, mixed feelings, agency, consent and consequences. Never decide the protagonist's feelings/actions. Do not force drama or instant repair."
+      "[CROSSED WIRES v6 — PRIVATE]",
+      "Profile " + profile.primary + (profile.secondary ? "+" + profile.secondary : "") + ". Preserve directional NPC relationship continuity, mixed feelings, agency, consent and consequences. Never decide the protagonist's feelings/actions. Do not force drama or instant repair.",
+      CW_clipText(CW_profileDirective(profile, cfg), 260)
     ];
     const compactProtocol = [
       "TAGS only at END. NPC [[CW_PERSON|Name|adult/minor/unknown]]; adult requires established 18+.",
@@ -1696,8 +2054,9 @@ function CW_stripTags(text) {
   let out = String(text || "");
   out = out.replace(/\[\[CW_PERSON\|[^\]]*\]\]/gi, "");
   out = out.replace(/\[\[CW_EVT\|[^\]]*\]\]/gi, "");
+  out = out.replace(/\[\[CW_ROLE\|[^\]]*\]\]/gi, "");
   out = out.replace(/\[\[CW_TWIST\|[^\]]*\]\]/gi, "");
-  out = out.split("\n").filter(function (line) { return !/\[\[CW_(?:PERSON|EVT|TWIST)\|/i.test(line); }).join("\n");
+  out = out.split("\n").filter(function (line) { return !/\[\[CW_(?:PERSON|EVT|ROLE|TWIST)\|/i.test(line); }).join("\n");
   out = out.replace(/\n{3,}/g, "\n\n").trim();
   return out || "\u200B";
 }
@@ -1734,6 +2093,11 @@ function CW_parseModelOutput(text, turn) {
   const personRegex = /\[\[CW_PERSON\|([^|\]]{1,42})\|(adult|minor|unknown)\]\]/gi;
   while ((m = personRegex.exec(raw)) !== null) CW_registerNpc(m[1], turn, m[2]);
 
+  const roleRegex = /\[\[CW_ROLE\|([^|\]]{1,42})\|([^|\]]{1,42})\|([a-z_]+)\]\]/gi;
+  while ((m = roleRegex.exec(raw)) !== null) {
+    if (CW_eventEvidenceSupported(raw, m[1], m[2])) CW_setRole(m[1], m[2], m[3], turn);
+  }
+
   let accepted = 0;
   const evtRegex = /\[\[CW_EVT\|([^|\]]{1,42})\|([^|\]]{1,42})\|([a-z_]+)\|([123])\|([^\]]{0,150})\]\]/gi;
   while ((m = evtRegex.exec(raw)) !== null && accepted < CW_config().maxEventsPerTurn) {
@@ -1749,7 +2113,7 @@ function CW_parseModelOutput(text, turn) {
     used = twistRegex.test(raw);
     tw.history.push({
       turn: turn, id: tw.pending.id, risk: tw.pending.risk || 2,
-      from: tw.pending.from, to: tw.pending.to, pairKey: tw.pending.pairKey,
+      from: tw.pending.from, to: tw.pending.to, pairKey: tw.pending.pairKey, profile: tw.pending.profile || "UNIVERSAL",
       used: used, forced: !!tw.pending.forced
     });
     if (tw.history.length > 80) tw.history.splice(0, tw.history.length - 80);
@@ -1782,6 +2146,9 @@ function CW_forgetNpc(name) {
   });
   cw.sightings = cw.sightings.filter(function (x) { return x && x.key !== key; });
   delete cw.npcs[key];
+  for (const rk in cw.roles) {
+    if (rk.startsWith(key + "->") || rk.endsWith("->" + key)) delete cw.roles[rk];
+  }
   for (const alias in cw.aliases) {
     if (alias === key || CW_resolveNpcKey(alias) === key) delete cw.aliases[alias];
   }
@@ -1810,7 +2177,7 @@ function CW_dashboard(filterName) {
   const cfg = CW_config();
   const turn = CW_turn();
   const filterKey = filterName ? CW_key(CW_resolveNpcName(filterName) || filterName) : "";
-  const lines = ["CROSSED WIRES v5 — RELATIONSHIPS"];
+  const lines = ["CROSSED WIRES v6 — RELATIONSHIPS"];
   const links = [];
 
   for (const pair of CW_pairKeys()) {
@@ -1827,7 +2194,8 @@ function CW_dashboard(filterName) {
     shown++;
     const status = link.mature ? CW_label(link.scores, link.familiarity, link.flags) : "still forming";
     lines.push("");
-    lines.push(link.from + " → " + link.to + " — " + status);
+    const role = CW_getRole(link.from, link.to);
+    lines.push(link.from + " → " + link.to + (role !== "unknown" ? " [" + CW_roleDisplay(role) + "]" : "") + " — " + status);
     lines.push("Read: " + CW_pressureText(link.scores));
     lines.push("Trajectory: " + link.trajectory + (link.unresolved ? " | Unresolved: " + link.unresolved : ""));
     if (cfg.showExactNumbersInDashboard) lines.push(CW_scoreText(link.scores));
@@ -1858,10 +2226,10 @@ function CW_dashboard(filterName) {
 
 function CW_twistHistory() {
   const h = state.crossedWires.twist.history || [];
-  const lines = ["CROSSED WIRES v5 — RECENT TWISTS"];
+  const lines = ["CROSSED WIRES v6 — RECENT TWISTS"];
   if (!h.length) return lines.concat(["No twist seeds have fired yet."]).join("\n");
   for (const t of h.slice(-15).reverse()) {
-    lines.push("Turn " + t.turn + ": " + t.id.replace(/_/g, " ") + " [risk " + (t.risk || 2) + "] — " + t.from + " ↔ " + t.to + (t.used ? " [used]" : " [skipped]") + (t.forced ? " [forced]" : ""));
+    lines.push("Turn " + t.turn + ": " + t.id.replace(/_/g, " ") + " [risk " + (t.risk || 2) + "]" + (t.profile ? " [" + t.profile + "]" : "") + " — " + t.from + " ↔ " + t.to + (t.used ? " [used]" : " [skipped]") + (t.forced ? " [forced]" : ""));
   }
   return lines.join("\n");
 }
@@ -1871,7 +2239,7 @@ function CW_configIssues() {
   if (!card || !card.entry) return ["Config card is missing; defaults are being used."];
   const map = CW_configMap(card.entry);
   const issues = [];
-  const boolKeys = ["ENABLED", "NPC INITIATIVE", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "DASHBOARD NUMBERS"];
+  const boolKeys = ["ENABLED", "NPC INITIATIVE", "ROLE AWARENESS", "SCENARIO TWISTS", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "DASHBOARD NUMBERS"];
   const boolValues = ["on", "yes", "true", "1", "enabled", "enable", "off", "no", "false", "0", "disabled", "disable"];
   for (const key of boolKeys) {
     if (map[key] == null) issues.push("Missing " + key.toLowerCase() + " (default used)");
@@ -1880,11 +2248,18 @@ function CW_configIssues() {
   const enums = {
     "RELATIONSHIP PACE": ["SLOW", "BALANCED", "FAST"],
     "EVENT SENSITIVITY": ["CONSERVATIVE", "BALANCED", "EXPRESSIVE"],
+    "SCENARIO MODE": CW_SCENARIO_MODES,
+    "ADAPTATION STRENGTH": ["LIGHT", "BALANCED", "FULL"],
     "TWIST MODE": ["OFF", "GROUNDED", "DRAMATIC", "WILD", "UNHINGED"]
   };
   for (const key in enums) {
-    if (map[key] == null) issues.push("Missing " + key.toLowerCase() + " (default used)");
-    else if (!enums[key].includes(String(map[key]).trim().toUpperCase())) issues.push("Invalid " + key.toLowerCase() + ": " + map[key]);
+    if (map[key] == null) {
+      issues.push("Missing " + key.toLowerCase() + " (default used)");
+      continue;
+    }
+    let value = String(map[key]).trim().toUpperCase();
+    if (key === "SCENARIO MODE") value = value.replace(/[ -]+/g, "_");
+    if (!enums[key].includes(value)) issues.push("Invalid " + key.toLowerCase() + ": " + map[key]);
   }
   const nums = {
     "OBSERVATION TURNS": [0, 12], "OBSERVATION APPEARANCES": [1, 8],
@@ -1914,6 +2289,8 @@ function CW_status() {
     "NPCs: " + Object.keys(cw.npcs).length + " | relationship events: " + cw.ledger.length + "/" + cfg.maxLedgerEvents,
     "Twist mode: " + cfg.twistMode + " | chance: " + (cfg.twistChancePercent < 0 ? "AUTO (" + CW_twistChance(cfg) + "%)" : cfg.twistChancePercent + "%") + " | starts after turn " + cfg.twistMinTurn,
     "Relationship pace: " + cfg.relationshipPace + " | event sensitivity: " + cfg.eventSensitivity,
+    "Scenario mode: " + cfg.scenarioMode + " | detected: " + (CW_currentScenarioProfile().primary || "UNIVERSAL") + (CW_currentScenarioProfile().secondary ? " + " + CW_currentScenarioProfile().secondary : "") + " | adaptation: " + cfg.adaptationStrength,
+    "Role awareness: " + (cfg.roleAwareness ? "ON" : "OFF") + " | scenario twists: " + (cfg.enableScenarioTwists ? "ON" : "OFF"),
     "Observation: " + cfg.observationTurns + " turns + " + cfg.observationAppearances + " appearances | active bonds: " + cfg.maxContextRelationships + " | memory anchors: " + cfg.memoryAnchors,
     "Context budget: " + cfg.contextBudgetChars + " chars | scene window: " + cfg.sceneHistoryActions + " actions",
     "Mature themes: " + (cfg.enableMatureThemes ? "ON" : "OFF") + " | adult intimacy: " + (cfg.enableAdultIntimacy ? "ON" : "OFF") + " | infidelity: " + (cfg.enableInfidelity ? "ON" : "OFF"),
@@ -1925,13 +2302,30 @@ function CW_status() {
   ].join("\n");
 }
 
+function CW_profileStatus() {
+  const cfg = CW_config();
+  const p = CW_currentScenarioProfile();
+  const lines = [
+    "CROSSED WIRES v" + CW_ENGINE_VERSION + " — ADAPTATION PROFILE",
+    "Configured mode: " + cfg.scenarioMode + " | strength: " + cfg.adaptationStrength,
+    "Active profile: " + (p.primary || "UNIVERSAL") + (p.secondary ? " + " + p.secondary : "") + " | confidence: " + Math.round(Number(p.confidence) || 0) + "%" + (p.manual ? " [manual]" : " [auto]"),
+    "Role awareness: " + (cfg.roleAwareness ? "ON" : "OFF") + " | scenario twists: " + (cfg.enableScenarioTwists ? "ON" : "OFF")
+  ];
+  if (Array.isArray(p.candidates) && p.candidates.length && !p.manual) {
+    lines.push("Top signals: " + p.candidates.slice(0, 4).map(function (x) { return x.mode + " " + x.score; }).join(" | "));
+  }
+  lines.push("Guidance: " + CW_profileDirective(p, cfg));
+  return lines.join("\n");
+}
+
 function CW_help() {
   return [
-    "CROSSED WIRES v5 COMMANDS",
+    "CROSSED WIRES v6 COMMANDS",
     "!wire NAME        — inspect relationships involving one character",
     "!wires            — inspect all tracked relationships",
     "!wiretwists       — show recent twist seeds and whether the narrator used them",
     "!wirestatus       — show engine/config status",
+    "!wireprofile      — show the detected/adaptive scenario profile",
     "!wireforget NAME  — remove one NPC and all tracked relationship history involving them",
     "!spark            — force any eligible twist on the NEXT normal turn",
     "!spark small      — force a low-risk relational beat",
@@ -1939,7 +2333,7 @@ function CW_help() {
     "!spark major      — force a high-stakes twist when eligible",
     "!wirehelp         — show this help",
     "",
-    "Settings live in the 'Crossed Wires Config' Story Card. Entry contains only editable values; Notes explain every setting and the repair system."
+    "Settings live in the 'Crossed Wires Config' Story Card. AUTO Scenario Mode adapts to the adventure; Notes explain every setting, supported profile and repair rule."
   ].join("\n");
 }
 
@@ -1959,6 +2353,7 @@ function CW_readCommand(text) {
   if (/^!wires\s*$/i.test(s)) return { type: "all" };
   if (/^!wiretwists\s*$/i.test(s)) return { type: "twists" };
   if (/^!wirestatus\s*$/i.test(s)) return { type: "status" };
+  if (/^!wireprofile\s*$/i.test(s)) return { type: "profile" };
   m = s.match(/^!spark(?:\s+(small|medium|major))?\s*$/i);
   if (m) return { type: "spark", tier: String(m[1] || "").toLowerCase() };
   if (/^!wirehelp\s*$/i.test(s)) return { type: "help" };
@@ -2009,7 +2404,7 @@ function CW_onContext(text) {
   if (typeof info !== "undefined" && Number.isFinite(Number(info.maxChars))) {
     headroom = Math.max(0, Math.min(headroom, Math.floor(Number(info.maxChars)) - String(text || "").length - 24));
   }
-  return text + CW_contextBlock(turn, headroom);
+  return text + CW_contextBlock(turn, headroom, text);
 }
 
 function CW_onOutput(text) {
@@ -2025,6 +2420,7 @@ function CW_onOutput(text) {
     if (cmd.type === "one") return CW_dashboard(cmd.name);
     if (cmd.type === "twists") return CW_twistHistory();
     if (cmd.type === "status") return CW_status();
+    if (cmd.type === "profile") return CW_profileStatus();
     if (cmd.type === "forget") {
       const forgotten = CW_forgetNpc(cmd.name);
       return forgotten ? "Crossed Wires: forgot " + forgotten + " and removed relationship history involving them." : "Crossed Wires: no tracked NPC matched '" + cmd.name + "'.";
