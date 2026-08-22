@@ -1,4 +1,4 @@
-// CROSSED WIRES v6 — Input tab
+// CROSSED WIRES — Input tab
 const modifier = (text) => {
   text = CW_onInput(text);
   return { text };

@@ -1,5 +1,5 @@
 // @cache-compatible
-// CROSSED WIRES v6 — Context tab
+// CROSSED WIRES — Context tab
 // Append-only so cache-compatible model context can keep its stable prefix.
 const modifier = (text) => {
   text = CW_onContext(text);
