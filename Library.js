@@ -1,6 +1,7 @@
 // ============================================================================
 // CROSSED WIRES — Adaptive Relationship Engine for AI Dungeon
-// Version 8 — adaptive social intelligence, relationship arcs/needs, correction tools, broader scenario coverage and stronger runtime resilience
+// Version 9 — emotional inertia, trust domains, bond stages, social threads,
+// power dynamics, authoritative corrections, cast controls and stronger long-story continuity
 // Put this ENTIRE file in the Library tab.
 //
 // Design goal: relationships create plot without turning every turn into drama.
@@ -8,7 +9,7 @@
 // state, scoring, pacing, scars, milestones, trajectory and twist selection.
 // ============================================================================
 
-const CW_ENGINE_VERSION = 8;
+const CW_ENGINE_VERSION = 9;
 
 let CW_RUNTIME_EVENT_INDEX = null;
 let CW_RUNTIME_CONFIG_CACHE = null;
@@ -38,6 +39,12 @@ const CW_DEFAULT_CONFIG = {
   groupDynamics: true,               // derive scene-level social-web guidance from active bonds
   deterministicRoleInference: true, // infer explicit roles such as sibling/boss/teammate from prose
   repetitionDamping: true,          // repeated low-value event families have diminishing influence
+  emotionalInertia: true,           // severe damage resists instant positive rebound
+  shockWindowTurns: 8,              // extra inertia after major damage
+  trustDomains: true,               // derive personal/operational/confidentiality/judgment trust
+  bondStages: true,                 // broad relationship stage separate from trajectory/arc
+  socialThreads: true,              // track multiple live unresolved social topics
+  powerDynamics: true,              // structural/earned leverage guidance
   adaptiveProtocol: true,           // shrink/expand hidden protocol to available context
   maxArchiveAnchors: 600,           // global durable turning-point archive cap
   scenarioMode: "AUTO",           // AUTO or an explicit scenario profile
@@ -164,6 +171,19 @@ const CW_EVENT_EFFECTS = {
   network_trust:           { trust: 4, openness: 4, respect: 2, loyalty: 1 },
   network_breach:          { trust: -8, openness: -6, resentment: 6, tension: 6, respect: -2 },
 
+  // v9 cross-scenario distinctions: these capture social meaning that generic
+  // warmth/support/betrayal tags flatten too aggressively.
+  gratitude:               { affection: 2, respect: 2, trust: 1, tension: -1 },
+  delegated_trust:         { trust: 5, respect: 3, loyalty: 2 },
+  responsibility_kept:     { trust: 5, respect: 4, loyalty: 3 },
+  responsibility_failed:   { trust: -5, respect: -4, loyalty: -3, resentment: 3, tension: 3 },
+  compromise:              { trust: 3, respect: 3, openness: 3, resentment: -2, tension: -3 },
+  public_praise:           { respect: 5, affection: 2, trust: 1 },
+  scapegoating:            { trust: -7, respect: -5, resentment: 7, tension: 6 },
+  power_shared:            { trust: 4, respect: 4, openness: 2, loyalty: 2 },
+  power_abused:            { trust: -8, respect: -6, resentment: 7, fear: 4, tension: 7, openness: -4 },
+  mutual_dependence:       { trust: 4, attachment: 4, loyalty: 4, tension: 1 },
+
   insult:                  { affection: -3, respect: -3, resentment: 3, tension: 4 },
   threat:                  { trust: -6, fear: 6, resentment: 4, tension: 6, openness: -3 },
   deception:               { trust: -6, openness: -5, respect: -1, resentment: 3 },
@@ -203,7 +223,7 @@ const CW_ROMANCE_EVENTS = [
   "temptation", "exclusivity_mismatch", "infidelity"
 ];
 const CW_MATURE_EVENTS = ["adult_intimacy", "casual_intimacy", "infidelity", "temptation", "exclusivity_mismatch", "parenthood_news"];
-const CW_TOXIC_EVENTS = ["manipulation", "coercive_pressure", "boundary_violated", "snooping", "blackmail"];
+const CW_TOXIC_EVENTS = ["manipulation", "coercive_pressure", "boundary_violated", "snooping", "blackmail", "power_abused"];
 
 // Event metadata keeps model classification from over-scoring one scene. Small
 // social beats cannot be promoted to life-changing severity, and related tags
@@ -215,7 +235,9 @@ const CW_EVENT_SEVERITY_CAPS = {
   team_failure:2, ideological_alignment:2, rivalry:2, suspicion:2, conflict:2,
   apology:2, forgiveness:2, boundary_discussion:2, healthy_space:2, temptation:2,
   care_under_pressure:2, confidentiality_kept:2, ethical_stand:2, testimony_backed:2,
-  testimony_challenged:2, cover_protected:2, fame_support:2, crew_loyalty:2, network_trust:2
+  testimony_challenged:2, cover_protected:2, fame_support:2, crew_loyalty:2, network_trust:2,
+  gratitude:1, delegated_trust:2, responsibility_kept:2, responsibility_failed:2,
+  compromise:2, public_praise:2, power_shared:2, mutual_dependence:2
 };
 
 const CW_EVENT_GROUPS = {
@@ -238,7 +260,10 @@ const CW_EVENT_GROUPS = {
   care_under_pressure:"care", confidentiality_kept:"confidentiality", confidentiality_breached:"confidentiality", ethical_stand:"ethics",
   testimony_backed:"testimony", testimony_challenged:"testimony", cover_protected:"cover", cover_compromised:"cover",
   fame_support:"reputation", fame_exposure:"reputation", crew_loyalty:"teamwork", mutiny_conflict:"major_breach",
-  network_trust:"openness", network_breach:"trust_breach"
+  network_trust:"openness", network_breach:"trust_breach",
+  gratitude:"recognition", delegated_trust:"reliability", responsibility_kept:"reliability", responsibility_failed:"responsibility",
+  compromise:"repair_heat", public_praise:"recognition", scapegoating:"reputation", power_shared:"power", power_abused:"major_breach",
+  mutual_dependence:"teamwork"
 };
 
 function CW_eventGroup(kind) { return CW_EVENT_GROUPS[kind] || kind; }
@@ -246,7 +271,8 @@ const CW_ARCHIVE_EVENT_KINDS = [
   "relationship_defined","exclusivity","moving_in","commitment","proposal","marriage",
   "rescue","sacrifice","betrayal","infidelity","breakup","abandonment","boundary_violated",
   "coercive_pressure","blackmail","reconciliation","parenthood_news","trust_repair",
-  "boundary_repair","abandonment_repair","secret_identity_revealed","shared_trauma"
+  "boundary_repair","abandonment_repair","secret_identity_revealed","shared_trauma",
+  "power_abused","scapegoating"
 ];
 
 function CW_shouldArchiveEvent(e) {
@@ -330,11 +356,13 @@ const CW_SCENARIO_EVENT_CODES = [
   "favoritism", "team_victory", "team_failure", "political_alliance", "public_scandal", "blackmail",
   "care_under_pressure", "confidentiality_kept", "confidentiality_breached", "ethical_stand",
   "testimony_backed", "testimony_challenged", "cover_protected", "cover_compromised",
-  "fame_support", "fame_exposure", "crew_loyalty", "mutiny_conflict", "network_trust", "network_breach"
+  "fame_support", "fame_exposure", "crew_loyalty", "mutiny_conflict", "network_trust", "network_breach",
+  "gratitude", "delegated_trust", "responsibility_kept", "responsibility_failed", "compromise",
+  "public_praise", "scapegoating", "power_shared", "power_abused", "mutual_dependence"
 ];
 
 const CW_PROFILE_EVENT_CODES = {
-  UNIVERSAL: ["cooperation", "dependability", "competence_proven", "solidarity", "shared_duty", "mentorship", "guidance", "grief_support", "mercy"],
+  UNIVERSAL: ["cooperation", "dependability", "competence_proven", "solidarity", "shared_duty", "mentorship", "guidance", "grief_support", "mercy", "gratitude", "responsibility_kept", "compromise", "public_praise", "power_shared"],
   ROMANCE: ["flirtation", "confession", "relationship_defined", "mutual_reassurance", "commitment", "jealousy_episode"],
   SLICE_OF_LIFE: ["quality_time", "warmth", "banter", "support", "family_support", "professional_support"],
   HORROR: ["protection", "shared_trauma", "grief_support", "grief_blame", "suspicion", "accusation", "mercy"],
@@ -343,12 +371,12 @@ const CW_PROFILE_EVENT_CODES = {
   SUPERHERO: ["secret_identity_revealed", "public_defense", "protection", "shared_duty", "ideological_conflict"],
   CRIME: ["shared_secret", "solidarity", "deception", "betrayal", "blackmail", "accusation", "suspicion_cleared"],
   MYSTERY: ["suspicion", "accusation", "suspicion_cleared", "honesty", "deception", "shared_secret"],
-  SURVIVAL: ["resource_shared", "resource_denied", "dependability", "protection", "rescue", "sacrifice", "solidarity"],
-  POLITICAL: ["political_alliance", "ideological_alignment", "ideological_conflict", "public_defense", "public_scandal", "betrayal"],
-  MILITARY: ["shared_duty", "command_backed", "command_refused", "dependability", "solidarity", "sacrifice"],
-  WORKPLACE: ["professional_support", "credit_shared", "credit_stolen", "competence_proven", "rivalry", "public_defense"],
+  SURVIVAL: ["resource_shared", "resource_denied", "dependability", "protection", "rescue", "sacrifice", "solidarity", "responsibility_kept", "responsibility_failed", "mutual_dependence"],
+  POLITICAL: ["political_alliance", "ideological_alignment", "ideological_conflict", "public_defense", "public_scandal", "betrayal", "delegated_trust", "public_praise", "scapegoating", "power_shared", "power_abused"],
+  MILITARY: ["shared_duty", "command_backed", "command_refused", "dependability", "solidarity", "sacrifice", "delegated_trust", "responsibility_kept", "responsibility_failed", "mutual_dependence"],
+  WORKPLACE: ["professional_support", "credit_shared", "credit_stolen", "competence_proven", "rivalry", "public_defense", "delegated_trust", "responsibility_failed", "public_praise", "scapegoating", "power_shared", "power_abused"],
   SCHOOL: ["support", "admiration", "rivalry", "team_victory", "team_failure", "mentorship", "guidance"],
-  FAMILY: ["family_support", "favoritism", "support", "neglect", "forgiveness", "boundary_discussion", "shared_duty"],
+  FAMILY: ["family_support", "favoritism", "support", "neglect", "forgiveness", "boundary_discussion", "shared_duty", "gratitude", "compromise", "responsibility_failed", "power_shared", "power_abused"],
   ADVENTURE: ["cooperation", "dependability", "protection", "rescue", "shared_success", "shared_duty", "resource_shared"],
   COMEDY: ["banter", "warmth", "quality_time", "conflict", "forgiveness", "public_rejection"],
   HISTORICAL: ["shared_duty", "political_alliance", "public_defense", "solidarity", "ideological_conflict", "family_support"],
@@ -497,6 +525,12 @@ const CW_TWISTS = [
   { id: "augmentation_secret", risk: 2, weight: 5, profiles: ["CYBERPUNK", "SCI_FI"], text: "A hidden augmentation, synthetic identity, data dependency, or technological vulnerability becomes relationship-relevant. Use only technology already supported by the setting." },
   { id: "corporate_leverage", risk: 3, weight: 5, profiles: ["CYBERPUNK", "WORKPLACE", "CRIME"], text: "An employer, corporation, fixer, or powerful organization gains leverage over one person's choices, forcing a conflict between survival/career and loyalty to someone else." },
 
+  { id: "responsibility_handoff", risk: 1, weight: 6, text: "One character is trusted with a concrete responsibility that matters to the other. Let follow-through, delegation, competence, or failure reveal the relationship without inventing an unrelated crisis." },
+  { id: "power_rebalance", risk: 2, weight: 5, profiles: ["WORKPLACE", "POLITICAL", "MILITARY", "FAMILY", "LEGAL", "ESPIONAGE", "NAUTICAL"], text: "Authority, information, resources, rank, or decision-making power shifts between the pair. Let them negotiate, share, resist, or misuse that power according to established character and role dynamics." },
+  { id: "scapegoat_pressure", risk: 3, weight: 4, profiles: ["WORKPLACE", "POLITICAL", "MILITARY", "SPORTS", "CRIME", "SURVIVAL"], text: "A failure or public problem creates pressure to assign blame. Someone may defend, distance themselves from, or unfairly scapegoat the other, but do not decide guilt without evidence." },
+  { id: "gratitude_complication", risk: 1, weight: 5, text: "A past favor, rescue, sacrifice, or dependable act creates gratitude or an awkward sense of obligation. Gratitude may deepen respect or closeness, but it is not automatic loyalty, romance, or debt." },
+  { id: "dependence_realized", risk: 2, weight: 5, profiles: ["SURVIVAL", "MILITARY", "ADVENTURE", "NAUTICAL", "POST_APOCALYPTIC"], text: "The pair realizes how much they rely on each other for safety, competence, access, stability, or morale. Let dependence create trust, pressure, fear of loss, or a need for autonomy without forcing closeness." },
+
   { id: "wild_card", risk: 4, weight: 2, wildOnly: true, curveball: true, text: "Invent one surprising relationship-specific curveball grounded in the established cast, scenario genre and continuity. It may be social, professional, familial, political, survival-driven, romantic, painful, funny, or life-changing, but it must grow from the current scenario rather than importing a different genre." }
 ];
 
@@ -543,6 +577,10 @@ function CW_init() {
   cw.ledger = Array.isArray(cw.ledger) ? cw.ledger : [];
   cw.archivedAnchors = Array.isArray(cw.archivedAnchors) ? cw.archivedAnchors : [];
   cw.sightings = Array.isArray(cw.sightings) ? cw.sightings : [];
+  cw.manualRoleLocks = cw.manualRoleLocks && typeof cw.manualRoleLocks === "object" ? cw.manualRoleLocks : {};
+  cw.manualAgeLocks = cw.manualAgeLocks && typeof cw.manualAgeLocks === "object" ? cw.manualAgeLocks : {};
+  cw.mutedNpcs = cw.mutedNpcs && typeof cw.mutedNpcs === "object" ? cw.mutedNpcs : {};
+  cw.pinnedNpcs = cw.pinnedNpcs && typeof cw.pinnedNpcs === "object" ? cw.pinnedNpcs : {};
   cw.command = cw.command || null;
   cw.lastActionCount = Number.isFinite(Number(cw.lastActionCount)) ? Number(cw.lastActionCount) : 0;
   cw.lastProcessedOutputTurn = Number.isFinite(Number(cw.lastProcessedOutputTurn)) ? Number(cw.lastProcessedOutputTurn) : -1;
@@ -671,7 +709,7 @@ function CW_recentHistoryText(limit) {
 }
 
 const CW_CONFIG_TITLE = "Crossed Wires Config";
-const CW_CONFIG_MARKER = "CWCFG8";
+const CW_CONFIG_MARKER = "CWCFG9";
 
 function CW_cardKeysText(card) {
   if (!card) return "";
@@ -716,6 +754,12 @@ function CW_defaultConfigEntryFrom(cfg) {
     "Relationship Needs: " + (c.needGuidance ? "ON" : "OFF"),
     "Group Dynamics: " + (c.groupDynamics ? "ON" : "OFF"),
     "Repetition Damping: " + (c.repetitionDamping ? "ON" : "OFF"),
+    "Emotional Inertia: " + (c.emotionalInertia ? "ON" : "OFF"),
+    "Shock Window: " + c.shockWindowTurns,
+    "Trust Domains: " + (c.trustDomains ? "ON" : "OFF"),
+    "Bond Stages: " + (c.bondStages ? "ON" : "OFF"),
+    "Social Threads: " + (c.socialThreads ? "ON" : "OFF"),
+    "Power Dynamics: " + (c.powerDynamics ? "ON" : "OFF"),
     "",
     "[Adaptation]",
     "Scenario Mode: " + c.scenarioMode,
@@ -782,6 +826,12 @@ function CW_configNotes() {
     "• Relationship Needs — ON derives the bond’s current pressure-points such as trust repair, honesty, reassurance, space, recognition, reliability, grief support, autonomy or clarity. These guide NPC initiative and twist weighting.",
     "• Group Dynamics — ON summarizes the active social web when several mature bonds share a scene, preserving mixed loyalties, group strain or cohesion without automatically copying one NPC’s feelings to another.",
     "• Repetition Damping — ON reduces the mechanical impact of repeated low-value event families occurring close together, preventing banter/support/conflict spam from maxing scores too quickly. Major turning points stay strong.",
+    "• Emotional Inertia — ON prevents severe betrayal, abandonment, breakup, coercion or boundary damage from being cancelled by a few small positive beats. Heat can cool quickly; deep trust/closeness rebounds more slowly.",
+    "• Shock Window — 2–20 turns. How long severe damage creates extra resistance to instant positive rebound. Genuine repair milestones can shorten it.",
+    "• Trust Domains — ON derives separate reads for personal trust, operational reliability, confidentiality and judgment. These are descriptive sub-reads derived from evidence, not four extra score bars.",
+    "• Bond Stages — ON derives a broad stage such as provisional, developing, established, close, interdependent, fractured, rebuilding or post-relationship.",
+    "• Social Threads — ON preserves several live unresolved topics per bond—such as secrecy, responsibility, recognition, grief, boundaries, reliability or reputation—instead of flattening everything into one issue.",
+    "• Power Dynamics — ON describes structural authority or leverage from roles and events (boss/employee, handler/asset, captain/crew, blackmail, shared power). It never assumes obedience, attraction or helplessness.",
     "",
     "ADAPTATION",
     "• Scenario Mode — AUTO lets Crossed Wires infer the current scenario from plot context, recent story, Story Cards and placeholders. Manual options: UNIVERSAL, ROMANCE, SLICE_OF_LIFE, HORROR, FANTASY, SCI_FI, SUPERHERO, CRIME, MYSTERY, SURVIVAL, POLITICAL, MILITARY, WORKPLACE, SCHOOL, FAMILY, ADVENTURE, COMEDY, HISTORICAL, SPORTS, MEDICAL, LEGAL, ESPIONAGE, CELEBRITY, NAUTICAL, WESTERN, POST_APOCALYPTIC, CYBERPUNK.",
@@ -828,7 +878,8 @@ function CW_configNotes() {
     "When the main event ledger eventually fills, major turning points such as commitments, rescues, betrayals, breakups, sacrifices and repair milestones are moved into a compact archive instead of being forgotten with routine old interactions.",
     "",
     "COMMANDS",
-    "!wire NAME • !wires • !wiretwists • !wirestatus • !wireprofile • !wireforget NAME • !wiremerge ALIAS | CANONICAL • !wirerole NAME | ROLE • !wireage NAME | adult/minor/unknown • !spark [small|medium|major] • !wirehelp",
+    "!wire NAME • !wires • !wiretwists • !wirestatus • !wireprofile • !wireforget NAME • !wiremerge ALIAS | CANONICAL • !wirerole NAME | ROLE • !wireage NAME | adult/minor/unknown • !wiremute NAME • !wireunmute NAME • !wirepin NAME • !wireunpin NAME • !spark [small|medium|major] • !wirehelp",
+    "Manual !wirerole and !wireage corrections become authoritative locks: later model tags or inference cannot silently overwrite them. !wiremute preserves history but removes an NPC from automatic relationship context/twists. !wirepin keeps an important NPC context-eligible off-screen without bypassing normal safety or twist rules.",
     "",
     "Internal format marker: " + CW_CONFIG_MARKER
   ].join("\n");
@@ -874,6 +925,12 @@ function CW_configFromEntry(entry) {
   cfg.needGuidance = CW_parseBool(map["RELATIONSHIP NEEDS"], cfg.needGuidance);
   cfg.groupDynamics = CW_parseBool(map["GROUP DYNAMICS"], cfg.groupDynamics);
   cfg.repetitionDamping = CW_parseBool(map["REPETITION DAMPING"], cfg.repetitionDamping);
+  cfg.emotionalInertia = CW_parseBool(map["EMOTIONAL INERTIA"], cfg.emotionalInertia);
+  cfg.shockWindowTurns = CW_readNumber(map["SHOCK WINDOW"], cfg.shockWindowTurns, 2, 20);
+  cfg.trustDomains = CW_parseBool(map["TRUST DOMAINS"], cfg.trustDomains);
+  cfg.bondStages = CW_parseBool(map["BOND STAGES"], cfg.bondStages);
+  cfg.socialThreads = CW_parseBool(map["SOCIAL THREADS"], cfg.socialThreads);
+  cfg.powerDynamics = CW_parseBool(map["POWER DYNAMICS"], cfg.powerDynamics);
   cfg.scenarioMode = String(map["SCENARIO MODE"] || cfg.scenarioMode).trim().toUpperCase().replace(/[ -]+/g, "_");
   if (!CW_SCENARIO_MODES.includes(cfg.scenarioMode)) cfg.scenarioMode = "AUTO";
   cfg.adaptationStrength = String(map["ADAPTATION STRENGTH"] || cfg.adaptationStrength).trim().toUpperCase();
@@ -949,14 +1006,14 @@ function CW_upgradeConfigCard(card) {
   if (!card) return;
   const notes = String(card.description || card.notes || "");
   const cleanIdentity = String(card.title || card.name || "") === CW_CONFIG_TITLE && !CW_cardKeysText(card).includes("__crossed_wires_config__");
-  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 8) return;
+  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 9) return;
   if (cleanIdentity && notes.includes(CW_CONFIG_MARKER)) {
-    if (state.crossedWires) state.crossedWires.configCardVersion = 8;
+    if (state.crossedWires) state.crossedWires.configCardVersion = 9;
     return;
   }
   const migrated = CW_configFromEntry(card.entry);
   CW_writeConfigCard(card, migrated);
-  if (state.crossedWires) state.crossedWires.configCardVersion = 8;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 9;
 }
 
 function CW_ensureConfigCard() {
@@ -974,11 +1031,11 @@ function CW_ensureConfigCard() {
   try {
     // Newer AI Dungeon builds accept name/title and notes after the documented
     // keys/entry/type arguments. Older builds simply use the first three.
-    const result = addStoryCard("__cw_config_bootstrap_8__", entry, "Custom", CW_CONFIG_TITLE, notes);
+    const result = addStoryCard("__cw_config_bootstrap_9__", entry, "Custom", CW_CONFIG_TITLE, notes);
     if (Number.isFinite(Number(result))) createdIndex = Number(result);
   } catch (e) {
     try {
-      const result = addStoryCard("__cw_config_bootstrap_8__", entry, "Custom");
+      const result = addStoryCard("__cw_config_bootstrap_9__", entry, "Custom");
       if (Number.isFinite(Number(result))) createdIndex = Number(result);
     } catch (fallbackError) {
       if (typeof log === "function") log("Crossed Wires: could not create config card: " + fallbackError);
@@ -1009,7 +1066,7 @@ function CW_ensureConfigCard() {
   card.name = CW_CONFIG_TITLE;
   card.description = notes;
   card.notes = notes;
-  if (state.crossedWires) state.crossedWires.configCardVersion = 8;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 9;
   CW_RUNTIME_CONFIG_CARD = card;
   CW_RUNTIME_CONFIG_CACHE = null;
   CW_RUNTIME_CONFIG_ENTRY = null;
@@ -1336,6 +1393,23 @@ function CW_mergeNpcAlias(aliasKey, canonicalKey, canonicalName) {
     }
   }
 
+  // Migrate v9 correction/cast-control state when identities are merged.
+  if (cw.manualAgeLocks[aliasKey] && !cw.manualAgeLocks[canonicalKey]) cw.manualAgeLocks[canonicalKey] = cw.manualAgeLocks[aliasKey];
+  delete cw.manualAgeLocks[aliasKey];
+  if (cw.mutedNpcs[aliasKey]) { cw.mutedNpcs[canonicalKey] = cw.mutedNpcs[aliasKey]; delete cw.mutedNpcs[aliasKey]; }
+  if (cw.pinnedNpcs[aliasKey]) { cw.pinnedNpcs[canonicalKey] = cw.pinnedNpcs[aliasKey]; delete cw.pinnedNpcs[aliasKey]; }
+  const rebuiltLocks = {};
+  for (const lk in cw.manualRoleLocks) {
+    const bits = lk.split("->");
+    if (bits.length !== 2) continue;
+    const lf = bits[0] === aliasKey ? canonicalKey : bits[0];
+    const lt = bits[1] === aliasKey ? canonicalKey : bits[1];
+    const nk = lf + "->" + lt;
+    const rec = cw.manualRoleLocks[lk];
+    if (!rebuiltLocks[nk] || Number((rec||{}).turn||0) >= Number((rebuiltLocks[nk]||{}).turn||0)) rebuiltLocks[nk] = rec;
+  }
+  cw.manualRoleLocks = rebuiltLocks;
+
   for (const a in cw.aliases) if (cw.aliases[a] === aliasKey) cw.aliases[a] = canonicalKey;
   CW_invalidateEventIndex();
 }
@@ -1406,6 +1480,9 @@ function CW_setRole(from, to, role, turn) {
   if (toName !== "YOU") CW_registerNpc(toName, turn);
   const fk = CW_key(CW_resolveNpcName(fromName));
   const tk = toName === "YOU" ? "you" : CW_key(CW_resolveNpcName(toName));
+  const lockKey = fk + "->" + tk;
+  const lock = state.crossedWires.manualRoleLocks[lockKey];
+  if (lock && lock.role && lock.role !== r) return false;
   CW_recordRole(fk, tk, r, turn);
   if (toName !== "YOU" && CW_ROLE_INVERSE[r]) CW_recordRole(tk, fk, CW_ROLE_INVERSE[r], turn);
   CW_rebuildRoles();
@@ -1503,7 +1580,9 @@ function CW_registerNpc(name, turn, adultStatus) {
   const clean = existing && existing.name ? existing.name : cleanInput;
   const key = CW_key(clean);
   const statusRaw = String(adultStatus || "unknown").toLowerCase();
-  const incomingAdult = ["adult", "minor"].includes(statusRaw) ? statusRaw : "unknown";
+  let incomingAdult = ["adult", "minor"].includes(statusRaw) ? statusRaw : "unknown";
+  const ageLock = state.crossedWires.manualAgeLocks[canonicalKey];
+  if (ageLock && ["adult","minor","unknown"].includes(ageLock.status)) incomingAdult = ageLock.status;
 
   if (!state.crossedWires.npcs[key]) {
     state.crossedWires.npcs[key] = {
@@ -1900,7 +1979,7 @@ function CW_relationshipNeeds(scores, flags, events, role, trajectory) {
     if (!needs.some(function (n) { return n.id === id; })) needs.push({ id:id, label:label, priority:priority, guidance:guidance });
   }
 
-  if (flags.boundaryScars > 0 || kinds.includes("boundary_violated") || kinds.includes("coercive_pressure")) {
+  if (flags.boundaryScars > 0 || kinds.includes("boundary_violated") || kinds.includes("coercive_pressure") || kinds.includes("power_abused")) {
     add("boundaries", "safe boundaries", 100, "respect boundaries through consistent behavior before pushing closeness");
   }
   if (flags.betrayalScars > 0 || scores.trust <= -30 || kinds.includes("betrayal") || kinds.includes("infidelity") || kinds.includes("confidentiality_breached") || kinds.includes("network_breach")) {
@@ -1917,10 +1996,10 @@ function CW_relationshipNeeds(scores, flags, events, role, trajectory) {
   if (scores.resentment >= 42 && !flags.betrayalScars && !flags.boundaryScars) add("conflict_resolution", "specific conflict resolution", 76, "address the actual source of resentment rather than using a generic apology");
   if (scores.jealousy >= 38 && ["romantic","ex"].includes(role)) add("reassurance", "clear reassurance", 74, "clarify expectations and security without treating jealousy as proof of love");
   if (!flags.defined && scores.attraction >= 38 && scores.attachment >= 28 && !CW_isFamilyRole(role)) add("clarity", "relationship clarity", 72, "let ambiguity become discussable without forcing reciprocity or commitment");
-  if (scores.respect <= -25 || kinds.includes("credit_stolen") || kinds.includes("humiliation")) add("recognition", "earned respect", 70, "give competence, accountability or recognition room to matter");
-  if (kinds.includes("broken_promise") || kinds.includes("neglect") || kinds.includes("command_refused") || kinds.includes("team_failure")) add("reliability", "reliability", 69, "let dependable follow-through matter more than promises");
+  if (scores.respect <= -25 || kinds.includes("credit_stolen") || kinds.includes("humiliation") || kinds.includes("scapegoating")) add("recognition", "earned respect", 70, "give competence, accountability or recognition room to matter");
+  if (kinds.includes("broken_promise") || kinds.includes("neglect") || kinds.includes("command_refused") || kinds.includes("team_failure") || kinds.includes("responsibility_failed")) add("reliability", "reliability", 69, "let dependable follow-through matter more than promises");
   if (kinds.includes("shared_trauma") || kinds.includes("grief_blame") || kinds.includes("grief_support")) add("grief_support", "grief support", 68, "allow grief to affect closeness without making trauma the whole relationship");
-  if (kinds.includes("manipulation") || kinds.includes("ultimatum") || kinds.includes("coercive_pressure")) add("autonomy", "autonomy", 86, "restore room for independent choices and consequences");
+  if (kinds.includes("manipulation") || kinds.includes("ultimatum") || kinds.includes("coercive_pressure") || kinds.includes("power_abused") || kinds.includes("blackmail")) add("autonomy", "autonomy", 86, "restore room for independent choices and consequences");
   if ((flags.brokenUp || kinds.includes("emotional_withdrawal") || kinds.includes("neglect")) && scores.affection >= 30) add("reconnection", "reconnection or honest distance", 66, "let the bond either reconnect through action or acknowledge distance honestly");
   if (trajectory === "volatile") add("stability", "stability", 64, "avoid another abrupt reversal unless the scene earns it");
   if (role === "rival" && scores.respect >= 25) add("recognition", "mutual recognition", 62, "let earned respect deepen the rivalry without automatically romanticizing it");
@@ -1955,6 +2034,77 @@ function CW_relationshipArc(scores, flags, events, role, trajectory) {
   return "established";
 }
 
+
+function CW_trustDomains(events) {
+  const d = { personal:0, operational:0, confidentiality:0, judgment:0 };
+  const map = {
+    honesty:{personal:5,judgment:2}, vulnerability:{personal:4}, empathy:{personal:3}, support:{personal:2},
+    kept_promise:{operational:6,personal:2}, dependability:{operational:6}, delegated_trust:{operational:5,judgment:3},
+    responsibility_kept:{operational:6,judgment:3}, responsibility_failed:{operational:-6,judgment:-4},
+    competence_proven:{operational:5,judgment:4}, command_backed:{operational:4}, command_refused:{operational:-3,judgment:-2},
+    shared_secret:{confidentiality:4,personal:2}, confidentiality_kept:{confidentiality:7}, confidentiality_breached:{confidentiality:-9,personal:-4},
+    cover_protected:{confidentiality:6,operational:2}, cover_compromised:{confidentiality:-8,operational:-4},
+    secret_identity_revealed:{personal:5,confidentiality:4}, secrecy_discovered:{personal:-4,confidentiality:-6},
+    deception:{personal:-6,judgment:-3}, broken_promise:{operational:-6,personal:-3}, betrayal:{personal:-8,operational:-5,judgment:-5},
+    infidelity:{personal:-10,judgment:-5}, blackmail:{personal:-9,judgment:-8}, power_abused:{personal:-6,judgment:-7},
+    ethical_stand:{judgment:6}, compromise:{judgment:3,personal:2}, public_defense:{personal:3,judgment:2},
+    rescue:{operational:4,personal:4}, sacrifice:{operational:4,personal:5}, resource_shared:{operational:3,personal:2}
+  };
+  for (const e of (events || [])) {
+    const m = map[e.kind]; if (!m) continue;
+    const mult = e.severity === 3 ? 1.5 : (e.severity === 2 ? 1 : 0.65);
+    for (const k in m) d[k] += m[k] * mult;
+  }
+  for (const k in d) d[k] = Math.max(-100, Math.min(100, Math.round(d[k])));
+  return d;
+}
+function CW_domainWord(v) { return v >= 30 ? "strong" : (v >= 10 ? "positive" : (v <= -30 ? "broken" : (v <= -10 ? "weak" : "uncertain"))); }
+function CW_trustDomainText(domains) {
+  if (!domains) return "";
+  const vals = Object.keys(domains).map(function(k){ return {k:k,v:domains[k]}; });
+  vals.sort(function(a,b){ return Math.abs(b.v)-Math.abs(a.v); });
+  return vals.slice(0,2).map(function(x){ return x.k + " trust " + CW_domainWord(x.v); }).join(", ");
+}
+function CW_bondStage(scores, flags, familiarity, events, arc) {
+  if ((flags.betrayalScars >= 2 || flags.boundaryScars >= 2) && scores.trust < 0) return "fractured";
+  if (arc === "repairing") return "rebuilding";
+  if (flags.brokenUp) return "post-relationship";
+  if (events.length <= 2 || familiarity < 20) return "provisional";
+  if (scores.trust >= 55 && (scores.affection >= 50 || scores.loyalty >= 50) && scores.attachment >= 45) return "interdependent";
+  if (scores.trust >= 35 && (scores.affection >= 35 || scores.respect >= 45 || scores.loyalty >= 40)) return "close";
+  if (familiarity >= 45) return "established";
+  return "developing";
+}
+function CW_liveThreads(scores, flags, events, role) {
+  const out=[], seen={};
+  function add(id,label,priority){ if(!seen[id]){seen[id]=1;out.push({id:id,label:label,priority:priority});} }
+  const kinds=CW_recentKinds(events,12);
+  if (flags.betrayalScars) add("trust","damaged trust",100);
+  if (flags.boundaryScars) add("boundaries","boundaries and safety",99);
+  if (flags.abandonmentScars) add("abandonment","reliability after abandonment",97);
+  if (kinds.includes("secrecy_discovered") || kinds.includes("confidentiality_breached") || kinds.includes("cover_compromised")) add("secrecy","secrecy/confidentiality",88);
+  if (kinds.includes("responsibility_failed") || kinds.includes("broken_promise") || kinds.includes("neglect")) add("responsibility","responsibility and follow-through",84);
+  if (kinds.includes("credit_stolen") || kinds.includes("public_rejection") || kinds.includes("humiliation") || kinds.includes("scapegoating")) add("recognition","recognition/reputation",82);
+  if (kinds.includes("power_abused") || kinds.includes("blackmail") || kinds.includes("coercive_pressure")) add("power","power and autonomy",95);
+  if (kinds.includes("grief_blame") || kinds.includes("shared_trauma")) add("grief","grief/trauma",78);
+  if (kinds.includes("ideological_conflict")) add("values","values or ideology",76);
+  if (scores.jealousy >= 40) add("jealousy","jealousy/insecurity",74);
+  if (role === "rival" && scores.respect >= 25) add("rivalry","recognition inside the rivalry",70);
+  if (!out.length && scores.tension >= 40) add("tension","unspoken tension",55);
+  return out.sort(function(a,b){return b.priority-a.priority;}).slice(0,4);
+}
+function CW_powerDynamic(role, events, scores) {
+  let structural="balanced";
+  if (["superior","mentor","parent","caregiver","clinician","attorney","handler","captain"].includes(role)) structural="FROM holds structural authority";
+  if (["subordinate","student","child","dependent","patient","client","asset","crew"].includes(role)) structural="TO holds structural authority";
+  const kinds=CW_recentKinds(events,10);
+  if (kinds.includes("blackmail")) return structural + "; leverage is coercive/compromised";
+  if (kinds.includes("power_abused")) return structural + "; power has recently been abused";
+  if (kinds.includes("power_shared")) return structural + "; power has recently been shared";
+  if (scores.fear >= 45 && scores.trust < 10) return structural + "; fear creates practical leverage";
+  return structural;
+}
+
 function CW_needContextText(link, maxCount) {
   if (!link || !Array.isArray(link.needs)) return "";
   const max = Math.max(1, Math.min(3, Number(maxCount) || 2));
@@ -1980,6 +2130,8 @@ function CW_computeLink(from, to, turn) {
   let betrayalScars = 0;
   let abandonmentScars = 0;
   let boundaryScars = 0;
+  let shockUntil = -1;
+  let shockKind = "";
   let lastTurn = events[0].turn;
   const recentGroupTurn = {};
   const recentKindTurn = {};
@@ -2015,6 +2167,14 @@ function CW_computeLink(from, to, turn) {
       delta *= delta >= 0 ? paceUp : paceDown;
       const current = scores[metric] || 0;
 
+      // Severe relationship damage creates a short shock window. Small warmth,
+      // banter or reassurance may cool tension, but should not instantly restore
+      // deep trust, loyalty, attachment or openness before repair is earned.
+      if (cfg.emotionalInertia && delta > 0 && Number(e.turn) <= shockUntil && ["trust","affection","attachment","openness","loyalty"].includes(metric)) {
+        const repairLike = ["trust_repair","boundary_repair","abandonment_repair","reconciliation","responsibility_kept","kept_promise"].includes(e.kind);
+        if (!repairLike) delta *= e.severity >= 2 ? 0.55 : 0.28;
+      }
+
       // Damage leaves inertia. Apologies can lower heat, but trust and closeness
       // recover primarily through repeated story-supported behavior.
       if (delta > 0 && metric === "trust" && (betrayalScars + boundaryScars) > 0) {
@@ -2041,6 +2201,11 @@ function CW_computeLink(from, to, turn) {
     if (e.kind === "trust_repair" && e.severity >= 2) betrayalScars = Math.max(0, betrayalScars - 1);
     if (e.kind === "boundary_repair" && e.severity >= 2) boundaryScars = Math.max(0, boundaryScars - 1);
     if (e.kind === "abandonment_repair" && e.severity >= 2) abandonmentScars = Math.max(0, abandonmentScars - 1);
+    if (cfg.emotionalInertia && e.severity >= 2 && ["betrayal","infidelity","abandonment","breakup","boundary_violated","coercive_pressure","blackmail","power_abused","scapegoating"].includes(e.kind)) {
+      shockUntil = Math.max(shockUntil, Number(e.turn) + Number(cfg.shockWindowTurns || 8));
+      shockKind = e.kind;
+    }
+    if (["trust_repair","boundary_repair","abandonment_repair","reconciliation"].includes(e.kind) && e.severity >= 2) shockUntil = Math.min(shockUntil, Number(e.turn) + 2);
   }
 
   CW_applyPassiveDecay(scores, turn - lastTurn);
@@ -2058,6 +2223,10 @@ function CW_computeLink(from, to, turn) {
   const role = CW_getRole(resolvedFrom, resolvedTo);
   const arc = CW_relationshipArc(scores, flags, events, role, trajectory);
   const needs = CW_relationshipNeeds(scores, flags, events, role, trajectory);
+  const domains = cfg.trustDomains ? CW_trustDomains(events) : null;
+  const stage = cfg.bondStages ? CW_bondStage(scores, flags, familiarity, events, arc) : "";
+  const threads = cfg.socialThreads ? CW_liveThreads(scores, flags, events, role) : [];
+  const power = cfg.powerDynamics ? CW_powerDynamic(role, events, scores) : "";
   const result = {
     from: events[events.length - 1].from,
     to: events[events.length - 1].to,
@@ -2070,6 +2239,12 @@ function CW_computeLink(from, to, turn) {
     trajectory: trajectory,
     arc: arc,
     needs: needs,
+    stage: stage,
+    trustDomains: domains,
+    threads: threads,
+    power: power,
+    shockActive: cfg.emotionalInertia && turn <= shockUntil,
+    shockKind: shockKind,
     unresolved: CW_unresolvedThread(scores, flags, events),
     mature: Number.isFinite(matureAt) && turn >= matureAt,
     matureAt: matureAt
@@ -2248,21 +2423,19 @@ function CW_relevantLinks(turn) {
   const sceneScores = CW_sceneNameScores();
   const links = [];
   for (const pair of CW_pairKeys()) {
-    // Reject off-screen pairs before reconstructing their scores. This matters
-    // in long ensemble adventures with hundreds of historical relationships.
     const fromKey = CW_resolveNpcKey(pair.from) || CW_key(pair.from);
     const toKey = CW_key(pair.to) === "you" ? "you" : (CW_resolveNpcKey(pair.to) || CW_key(pair.to));
+    if (state.crossedWires.mutedNpcs[fromKey] || (toKey !== "you" && state.crossedWires.mutedNpcs[toKey])) continue;
     const relevance = Math.max(sceneScores[fromKey] || 0, toKey === "you" ? 0 : (sceneScores[toKey] || 0));
-    if (relevance <= 0) continue;
-
+    const pinned = !!state.crossedWires.pinnedNpcs[fromKey] || (toKey !== "you" && !!state.crossedWires.pinnedNpcs[toKey]);
+    if (relevance <= 0 && !pinned) continue;
     const link = CW_computeLink(pair.from, pair.to, turn);
     if (!link || !link.mature) continue;
-    link.sceneRelevance = relevance;
+    link.sceneRelevance = relevance + (pinned ? 1 : 0);
+    link.pinnedContext = pinned;
     links.push(link);
   }
-  links.sort(function (a, b) {
-    return (b.sceneRelevance - a.sceneRelevance) || (b.lastChanged - a.lastChanged);
-  });
+  links.sort(function (a, b) { return (b.sceneRelevance - a.sceneRelevance) || (b.lastChanged - a.lastChanged); });
   return links.slice(0, cfg.maxContextRelationships);
 }
 
@@ -2343,13 +2516,13 @@ function CW_twistNeedFactor(t, link, cfg) {
   const map = {
     trust_repair: ["reconciliation_window","quiet_followup","earned_respect","protective_choice","vulnerable_reveal","confidentiality_pressure"],
     boundaries: ["boundary_talk","professional_boundary","distance_pressure","ethical_line"],
-    reliability: ["loyalty_test","protective_choice","quiet_followup","resource_choice","order_vs_loyalty","captains_order"],
+    reliability: ["loyalty_test","protective_choice","quiet_followup","resource_choice","order_vs_loyalty","captains_order","responsibility_handoff","dependence_realized"],
     honesty: ["vulnerable_reveal","confidant_dilemma","secret_exposed","define_the_relationship","withheld_clue","cover_at_risk"],
     reassurance: ["public_choice","unexpected_kindness","define_the_relationship","mixed_signals"],
     clarity: ["define_the_relationship","future_mismatch","boundary_talk","casual_vs_serious"],
-    recognition: ["earned_respect","public_choice","credit_dispute","promotion_rift","performance_pressure"],
+    recognition: ["earned_respect","public_choice","credit_dispute","promotion_rift","performance_pressure","gratitude_complication","scapegoat_pressure"],
     grief_support: ["quiet_followup","unexpected_kindness","vulnerable_reveal","survivor_guilt"],
-    autonomy: ["boundary_talk","distance_pressure","ethical_line","professional_boundary"],
+    autonomy: ["boundary_talk","distance_pressure","ethical_line","professional_boundary","power_rebalance","dependence_realized"],
     reconnection: ["reconciliation_window","quiet_followup","shared_ritual","unexpected_kindness"],
     conflict_resolution: ["reconciliation_window","boundary_talk","unexpected_alliance","earned_respect"],
     stability: ["quiet_followup","shared_ritual","unexpected_kindness","earned_respect"],
@@ -2365,11 +2538,19 @@ function CW_twistNeedFactor(t, link, cfg) {
   if (link.arc === "stable close bond" && (t.risk || 2) >= 3) factor *= 0.72;
   if (link.arc === "competitive respect" && ["earned_respect","unexpected_alliance","rivalry_shift","public_choice"].includes(t.id)) factor *= 1.35;
   if (link.arc === "slow-burn chemistry" && ["unexpected_confession","define_the_relationship","mixed_signals","quiet_followup"].includes(t.id)) factor *= 1.35;
-  if (link.arc === "professional tension" && ["professional_boundary","credit_dispute","ethical_line","public_private_split"].includes(t.id)) factor *= 1.35;
+  if (link.arc === "professional tension" && ["professional_boundary","credit_dispute","ethical_line","public_private_split","power_rebalance","responsibility_handoff","scapegoat_pressure"].includes(t.id)) factor *= 1.35;
+  if (link.threads && link.threads.some(function(x){ return x.id === "power"; }) && ["power_rebalance","boundary_talk","ethical_line"].includes(t.id)) factor *= 1.35;
+  if (link.threads && link.threads.some(function(x){ return x.id === "responsibility"; }) && ["responsibility_handoff","quiet_followup","earned_respect"].includes(t.id)) factor *= 1.35;
+  if (link.trustDomains) {
+    if (link.trustDomains.operational <= -10 && ["responsibility_handoff","dependence_realized","loyalty_test"].includes(t.id)) factor *= 1.22;
+    if (link.trustDomains.confidentiality <= -10 && ["confidentiality_pressure","secret_exposed","withheld_clue"].includes(t.id)) factor *= 1.22;
+    if (link.trustDomains.judgment <= -10 && ["ethical_line","power_rebalance","leadership_challenge"].includes(t.id)) factor *= 1.18;
+  }
   return Math.max(0.35, Math.min(3.2, factor));
 }
 
 function CW_twistCandidates(link, cfg, turn, forcedTier) {
+  if (CW_isMutedName(link.from) || (link.to !== "YOU" && CW_isMutedName(link.to))) return [];
   const defaultMax = { OFF: 2, GROUNDED: 2, DRAMATIC: 3, WILD: 4, UNHINGED: 4 }[cfg.twistMode] || 3;
   const requestedRisk = forcedTier === "small" ? 1 : (forcedTier === "medium" ? 2 : (forcedTier === "major" ? 4 : 0));
   const maxRisk = requestedRisk || defaultMax;
@@ -2458,7 +2639,7 @@ function CW_chooseTwistLink(turn, cfg, forced) {
   }
   if (!links.length && (forced || cfg.allowOffscreenTwists)) {
     links = CW_pairKeys().map(function (p) { return CW_computeLink(p.from, p.to, turn); })
-      .filter(function (l) { return l && l.mature; })
+      .filter(function (l) { return l && l.mature && !CW_isMutedName(l.from) && (l.to === "YOU" || !CW_isMutedName(l.to)); })
       .sort(function (a, b) { return b.lastChanged - a.lastChanged; });
   }
   if (!links.length) return null;
@@ -2617,10 +2798,15 @@ function CW_relationshipContextLine(link, turn) {
   let line = "- " + link.from + " → " + link.to + (role !== "unknown" ? " [" + CW_roleDisplay(role) + "]" : "") + ": " + CW_roleAwareLabel(link) +
     "; " + CW_pressureText(link.scores) + "; trajectory " + link.trajectory + ".";
   if (cfg.arcGuidance && link.arc) line += " Arc: " + link.arc + ".";
+  if (cfg.bondStages && link.stage) line += " Stage: " + link.stage + ".";
   if (cfg.needGuidance) {
     const needs = CW_needContextText(link, 2);
     if (needs) line += " Pressure-points: " + needs + ".";
   }
+  if (cfg.trustDomains && link.trustDomains) { const td = CW_trustDomainText(link.trustDomains); if (td) line += " Trust domains: " + td + "."; }
+  if (cfg.socialThreads && link.threads && link.threads.length) line += " Live threads: " + link.threads.slice(0,2).map(function(x){return x.label;}).join(", ") + ".";
+  if (cfg.powerDynamics && link.power && link.power !== "balanced") line += " Power: " + link.power + ".";
+  if (link.shockActive) line += " Recent major damage still has emotional inertia; small positive beats should not reset the bond.";
   if (link.flags.betrayalScars || link.flags.abandonmentScars || link.flags.boundaryScars) line += " Durable relationship damage remains and requires earned repair.";
   if (link.unresolved) line += " Unresolved: " + link.unresolved + ".";
   const anchor = CW_anchorText(link, cfg);
@@ -2638,7 +2824,7 @@ function CW_contextEventCodes(cfg, profile, links, compact) {
   const allowed = CW_allowedEventCodes(cfg, profile);
   const out = [];
   function add(kind) { if (allowed.includes(kind) && !out.includes(kind)) out.push(kind); }
-  ["warmth","support","empathy","honesty","vulnerability","admiration","cooperation","dependability","protection","kept_promise","shared_success","apology","forgiveness","insult","deception","broken_promise","betrayal","conflict","suspicion","rivalry","rejection","abandonment"].forEach(add);
+  ["warmth","support","empathy","honesty","vulnerability","admiration","gratitude","cooperation","dependability","delegated_trust","responsibility_kept","responsibility_failed","compromise","public_praise","power_shared","power_abused","mutual_dependence","protection","kept_promise","shared_success","apology","forgiveness","insult","deception","broken_promise","betrayal","conflict","suspicion","rivalry","rejection","abandonment"].forEach(add);
   for (const kind of CW_profileEventCodes(profile)) add(kind);
   const active = Array.isArray(links) ? links : [];
   const hasRomance = active.some(function (l) { return ["romantic","ex"].includes(CW_getRole(l.from,l.to)) || l.scores.attraction >= 20 || l.flags.defined || l.flags.committed; });
@@ -2683,7 +2869,8 @@ function CW_allowedEventCodes(cfg, profile) {
 function CW_coreEventCodes(cfg, profile) {
   const allowed = CW_allowedEventCodes(cfg, profile);
   const preferred = [
-    "warmth", "support", "empathy", "honesty", "vulnerability", "admiration", "protection",
+    "warmth", "support", "empathy", "honesty", "vulnerability", "admiration", "gratitude", "protection",
+    "delegated_trust", "responsibility_kept", "responsibility_failed", "compromise", "public_praise", "power_shared", "power_abused", "mutual_dependence",
     "flirtation", "confession", "relationship_defined", "commitment", "kept_promise", "rescue",
     "forgiveness", "trust_repair", "boundary_repair", "abandonment_repair",
     "insult", "deception", "broken_promise", "betrayal", "conflict", "rivalry", "jealousy_episode",
@@ -2748,7 +2935,8 @@ function CW_contextBlock(turn, hardBudget, baseContext) {
     cfg.enableRomance ? "Romance codes such as flirtation, date_or_courtship, confession, relationship_defined, exclusivity, commitment, proposal and marriage require explicitly romantic relationship evidence. Do not use them for mission commitment, testimony, ordinary secrets, teamwork or duty." : "",
     "TYPE=" + eventCodes.replace(/, /g, ","),
     "Max " + cfg.maxEventsPerTurn + " events. New story-supported evidence only: no routine talk, recalled old incidents, repeated updates or unsupported private feelings. Memory note: factual, <=150 chars, no | or ].",
-    "trust_repair/boundary_repair/abandonment_repair require demonstrated rebuilding, not one apology or instant forgiveness.",
+    "trust_repair/boundary_repair/abandonment_repair require demonstrated rebuilding, not one apology or instant forgiveness. Severe damage has emotional inertia: a few small positive beats are not a reset.",
+    "When relevant, distinguish personal trust from operational reliability, confidentiality and judgment. Preserve structural power differences without assuming obedience, attraction or helplessness.",
     "New NPCs remain provisional for " + cfg.observationTurns + " turns AND " + cfg.observationAppearances + " appearances; record early evidence conservatively.",
     "[/CROSSED WIRES]"
   ];
@@ -2988,6 +3176,10 @@ function CW_forgetNpc(name) {
   cw.roleHistory = (cw.roleHistory || []).filter(function (r) { return r && r.fromKey !== key && r.toKey !== key; });
   cw.sightings = cw.sightings.filter(function (x) { return x && x.key !== key; });
   delete cw.npcs[key];
+  delete cw.manualAgeLocks[key];
+  delete cw.mutedNpcs[key];
+  delete cw.pinnedNpcs[key];
+  for (const lk in cw.manualRoleLocks) if (lk.startsWith(key + "->") || lk.endsWith("->" + key)) delete cw.manualRoleLocks[lk];
   for (const rk in cw.roles) {
     if (rk.startsWith(key + "->") || rk.endsWith("->" + key)) delete cw.roles[rk];
   }
@@ -3025,6 +3217,7 @@ function CW_manualAge(name, status) {
   const key = CW_resolveNpcKey(clean);
   if (!key || !state.crossedWires.npcs[key]) return "";
   state.crossedWires.npcs[key].adultStatus = st;
+  state.crossedWires.manualAgeLocks[key] = { status: st, turn: CW_turn() };
   return state.crossedWires.npcs[key].name || clean;
 }
 
@@ -3033,8 +3226,24 @@ function CW_manualRole(fromName, toName, role) {
   const to = !toName || CW_key(toName) === "you" ? "YOU" : (CW_resolveNpcName(toName) || CW_cleanName(toName));
   const r = String(role || "").trim().toLowerCase().replace(/[ -]+/g, "_");
   if (!from || !to || !CW_ROLE_CODES.includes(r)) return false;
+  const fk = CW_key(CW_resolveNpcName(from) || from);
+  const tk = to === "YOU" ? "you" : CW_key(CW_resolveNpcName(to) || to);
+  state.crossedWires.manualRoleLocks[fk + "->" + tk] = { role:r, turn:CW_turn() };
+  if (to !== "YOU" && CW_ROLE_INVERSE[r]) state.crossedWires.manualRoleLocks[tk + "->" + fk] = { role:CW_ROLE_INVERSE[r], turn:CW_turn() };
   return CW_setRole(from, to, r, CW_turn());
 }
+
+function CW_setNpcCastFlag(name, kind, enabled) {
+  const clean = CW_resolveNpcName(name) || CW_cleanName(name);
+  if (!clean || CW_isPlayerName(clean)) return "";
+  const key = CW_resolveNpcKey(clean) || CW_key(clean);
+  if (!state.crossedWires.npcs[key]) return "";
+  const bucket = kind === "pin" ? state.crossedWires.pinnedNpcs : state.crossedWires.mutedNpcs;
+  if (enabled) bucket[key] = { turn:CW_turn() }; else delete bucket[key];
+  return state.crossedWires.npcs[key].name || clean;
+}
+function CW_isMutedName(name) { const key=CW_resolveNpcKey(name)||CW_key(name); return !!(key && state.crossedWires.mutedNpcs[key]); }
+function CW_isPinnedName(name) { const key=CW_resolveNpcKey(name)||CW_key(name); return !!(key && state.crossedWires.pinnedNpcs[key]); }
 
 function CW_dashboard(filterName) {
   const cfg = CW_config();
@@ -3060,8 +3269,12 @@ function CW_dashboard(filterName) {
     const role = CW_getRole(link.from, link.to);
     lines.push(link.from + " → " + link.to + (role !== "unknown" ? " [" + CW_roleDisplay(role) + "]" : "") + " — " + status);
     lines.push("Read: " + CW_pressureText(link.scores));
-    lines.push("Trajectory: " + link.trajectory + (link.arc ? " | Arc: " + link.arc : "") + (link.unresolved ? " | Unresolved: " + link.unresolved : ""));
+    lines.push("Trajectory: " + link.trajectory + (link.arc ? " | Arc: " + link.arc : "") + (link.stage ? " | Stage: " + link.stage : "") + (link.unresolved ? " | Unresolved: " + link.unresolved : ""));
     if (link.needs && link.needs.length) lines.push("Pressure-points: " + link.needs.slice(0, 3).map(function (n) { return n.label; }).join(" • "));
+    if (cfg.trustDomains && link.trustDomains) lines.push("Trust domains: " + CW_trustDomainText(link.trustDomains));
+    if (cfg.socialThreads && link.threads && link.threads.length) lines.push("Live threads: " + link.threads.slice(0,3).map(function(x){return x.label;}).join(" • "));
+    if (cfg.powerDynamics && link.power && link.power !== "balanced") lines.push("Power: " + link.power);
+    if (link.shockActive) lines.push("Emotional inertia: active after " + String(link.shockKind || "major damage").replace(/_/g," ") + ".");
     if (cfg.showExactNumbersInDashboard) lines.push(CW_scoreText(link.scores));
     if (link.flags.betrayalScars || link.flags.abandonmentScars || link.flags.boundaryScars) {
       lines.push("Scars: betrayal " + link.flags.betrayalScars + " | abandonment " + link.flags.abandonmentScars + " | boundaries " + link.flags.boundaryScars);
@@ -3103,7 +3316,7 @@ function CW_configIssues() {
   if (!card || !card.entry) return ["Config card is missing; defaults are being used."];
   const map = CW_configMap(card.entry);
   const issues = [];
-  const boolKeys = ["ENABLED", "NPC INITIATIVE", "ARC GUIDANCE", "RELATIONSHIP NEEDS", "GROUP DYNAMICS", "REPETITION DAMPING", "ROLE AWARENESS", "ROLE INFERENCE", "SCENARIO TWISTS", "OFFSCREEN TWISTS", "TWIST NEED BIAS", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "ADAPTIVE PROTOCOL", "DASHBOARD NUMBERS"];
+  const boolKeys = ["ENABLED", "NPC INITIATIVE", "ARC GUIDANCE", "RELATIONSHIP NEEDS", "GROUP DYNAMICS", "REPETITION DAMPING", "EMOTIONAL INERTIA", "TRUST DOMAINS", "BOND STAGES", "SOCIAL THREADS", "POWER DYNAMICS", "ROLE AWARENESS", "ROLE INFERENCE", "SCENARIO TWISTS", "OFFSCREEN TWISTS", "TWIST NEED BIAS", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "ADAPTIVE PROTOCOL", "DASHBOARD NUMBERS"];
   const boolValues = ["on", "yes", "true", "1", "enabled", "enable", "off", "no", "false", "0", "disabled", "disable"];
   for (const key of boolKeys) {
     if (map[key] == null) issues.push("Missing " + key.toLowerCase() + " (default used)");
@@ -3127,7 +3340,7 @@ function CW_configIssues() {
   }
   const nums = {
     "OBSERVATION TURNS": [0, 12], "OBSERVATION APPEARANCES": [1, 8],
-    "ACTIVE BONDS": [1, 12], "MEMORY ANCHORS": [0, 3], "PROFILE STABILITY": [0, 12], "SCENE HISTORY": [2, 10],
+    "ACTIVE BONDS": [1, 12], "MEMORY ANCHORS": [0, 3], "SHOCK WINDOW": [2, 20], "PROFILE STABILITY": [0, 12], "SCENE HISTORY": [2, 10],
     "CONTEXT BUDGET": [2400, 8000], "ARCHIVE ANCHORS": [200, 1200], "TWISTS START AFTER": [0, 100],
     "TWIST COOLDOWN": [2, 30], "TWIST SCENE WINDOW": [1, 5], "PAIR TWIST COOLDOWN": [2, 40], "REPEAT TWIST COOLDOWN": [4, 100]
   };
@@ -3156,6 +3369,8 @@ function CW_status() {
     "Scenario mode: " + cfg.scenarioMode + " | profile stability: " + cfg.profileStabilityTurns + " | detected: " + (CW_currentScenarioProfile().primary || "UNIVERSAL") + (CW_currentScenarioProfile().secondary ? " + " + CW_currentScenarioProfile().secondary : "") + " | adaptation: " + cfg.adaptationStrength,
     "Role awareness: " + (cfg.roleAwareness ? "ON" : "OFF") + " | role inference: " + (cfg.deterministicRoleInference ? "ON" : "OFF") + " | scenario twists: " + (cfg.enableScenarioTwists ? "ON" : "OFF") + " | offscreen twists: " + (cfg.allowOffscreenTwists ? "ON" : "OFF"),
     "Arc guidance: " + (cfg.arcGuidance ? "ON" : "OFF") + " | relationship needs: " + (cfg.needGuidance ? "ON" : "OFF") + " | group dynamics: " + (cfg.groupDynamics ? "ON" : "OFF") + " | repetition damping: " + (cfg.repetitionDamping ? "ON" : "OFF"),
+    "Emotional inertia: " + (cfg.emotionalInertia ? "ON (" + cfg.shockWindowTurns + " turns)" : "OFF") + " | trust domains: " + (cfg.trustDomains ? "ON" : "OFF") + " | bond stages: " + (cfg.bondStages ? "ON" : "OFF") + " | threads: " + (cfg.socialThreads ? "ON" : "OFF") + " | power: " + (cfg.powerDynamics ? "ON" : "OFF"),
+    "Cast controls: " + Object.keys(cw.pinnedNpcs || {}).length + " pinned | " + Object.keys(cw.mutedNpcs || {}).length + " muted | manual locks: " + (Object.keys(cw.manualRoleLocks || {}).length + Object.keys(cw.manualAgeLocks || {}).length),
     "Observation: " + cfg.observationTurns + " turns + " + cfg.observationAppearances + " appearances | active bonds: " + cfg.maxContextRelationships + " | memory anchors: " + cfg.memoryAnchors,
     "Context budget: " + cfg.contextBudgetChars + " chars | scene window: " + cfg.sceneHistoryActions + " actions | twist scene window: " + cfg.twistSceneWindow,
     (function () { const e = CW_runtimeEnvironment(); return "Runtime: " + (e.modelName || "model unknown") + (e.modelVersion ? " " + e.modelVersion : "") + " | optimized/cache-efficient: " + (e.useCacheEfficient ? "YES" : "NO") + (e.maxChars ? " | max chars " + e.maxChars : ""); })(),
@@ -3194,8 +3409,12 @@ function CW_help() {
     "!wireprofile      — show the detected/adaptive scenario profile",
     "!wireforget NAME  — remove one NPC and all tracked relationship history involving them",
     "!wiremerge ALIAS | CANONICAL — merge duplicate/alias NPC identities without losing history",
-    "!wirerole NAME | ROLE — manually set NAME → YOU role; or FROM | TO | ROLE for NPC→NPC",
-    "!wireage NAME | adult/minor/unknown — correct one NPC's age status used by adult-only gating",
+    "!wirerole NAME | ROLE — manually set and LOCK NAME → YOU role; or FROM | TO | ROLE for NPC→NPC",
+    "!wireage NAME | adult/minor/unknown — correct and LOCK one NPC's age status used by adult-only gating",
+    "!wiremute NAME     — keep history but remove an NPC from automatic context/twists",
+    "!wireunmute NAME   — restore a muted NPC",
+    "!wirepin NAME      — keep an important NPC context-eligible while off-screen",
+    "!wireunpin NAME    — remove that pin",
     "!spark            — force any eligible twist on the NEXT normal turn",
     "!spark small      — force a low-risk relational beat",
     "!spark medium     — force a medium complication",
@@ -3223,6 +3442,14 @@ function CW_readCommand(text) {
   if (m) return { type: "role", from: CW_commandNameArg(m[1]), to: CW_commandNameArg(m[2]), role: String(m[3]).trim() };
   m = s.match(/^!wirerole\s+(.+?)\s*\|\s*([a-z_ -]+)\s*$/i);
   if (m) return { type: "role", from: CW_commandNameArg(m[1]), to: "YOU", role: String(m[2]).trim() };
+  m = s.match(/^!wiremute\s+(.+?)\s*$/i);
+  if (m) return { type: "mute", name: CW_commandNameArg(m[1]) };
+  m = s.match(/^!wireunmute\s+(.+?)\s*$/i);
+  if (m) return { type: "unmute", name: CW_commandNameArg(m[1]) };
+  m = s.match(/^!wirepin\s+(.+?)\s*$/i);
+  if (m) return { type: "pin", name: CW_commandNameArg(m[1]) };
+  m = s.match(/^!wireunpin\s+(.+?)\s*$/i);
+  if (m) return { type: "unpin", name: CW_commandNameArg(m[1]) };
   m = s.match(/^!wireforget\s+(.+?)\s*$/i);
   if (m) return { type: "forget", name: CW_commandNameArg(m[1]) };
   m = s.match(/^!wire\s+(.+?)\s*$/i);
@@ -3335,6 +3562,14 @@ function CW_onOutput(text) {
     if (cmd.type === "twists") return CW_twistHistory();
     if (cmd.type === "status") return CW_status();
     if (cmd.type === "profile") return CW_profileStatus();
+    if (["mute","unmute","pin","unpin"].includes(cmd.type)) {
+      const kind = (cmd.type === "pin" || cmd.type === "unpin") ? "pin" : "mute";
+      const enabled = cmd.type === "pin" || cmd.type === "mute";
+      const changed = CW_setNpcCastFlag(cmd.name, kind, enabled);
+      if (!changed) return "Crossed Wires: no tracked NPC matched '" + cmd.name + "'.";
+      if (kind === "pin") return "Crossed Wires: " + changed + (enabled ? " is pinned for relationship continuity." : " is no longer pinned.");
+      return "Crossed Wires: " + changed + (enabled ? " is muted from automatic relationship context/twists; history is preserved." : " is unmuted.");
+    }
     if (cmd.type === "forget") {
       const forgotten = CW_forgetNpc(cmd.name);
       return forgotten ? "Crossed Wires: forgot " + forgotten + " and removed relationship history involving them." : "Crossed Wires: no tracked NPC matched '" + cmd.name + "'.";
