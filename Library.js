@@ -1,7 +1,7 @@
 // ============================================================================
 // CROSSED WIRES — Adaptive Relationship Engine for AI Dungeon
-// Version 9 — emotional inertia, trust domains, bond stages, social threads,
-// power dynamics, authoritative corrections, cast controls and stronger long-story continuity
+// Version 10 — bond resilience, twist diversity, cast-balanced context, salience-aware memory,
+// correction unlocks and a tighter adaptive relationship protocol
 // Put this ENTIRE file in the Library tab.
 //
 // Design goal: relationships create plot without turning every turn into drama.
@@ -9,7 +9,7 @@
 // state, scoring, pacing, scars, milestones, trajectory and twist selection.
 // ============================================================================
 
-const CW_ENGINE_VERSION = 9;
+const CW_ENGINE_VERSION = 10;
 
 let CW_RUNTIME_EVENT_INDEX = null;
 let CW_RUNTIME_CONFIG_CACHE = null;
@@ -19,6 +19,8 @@ let CW_RUNTIME_SCENE_SCORES = null;
 let CW_RUNTIME_PROFILE_CACHE = null;
 let CW_RUNTIME_ENV_CACHE = null;
 let CW_RUNTIME_LINK_CACHE = null;
+let CW_RUNTIME_PAIR_CACHE = null;
+let CW_RUNTIME_RELEVANT_CACHE = null;
 
 const CW_DEFAULT_CONFIG = {
   enabled: true,
@@ -45,6 +47,8 @@ const CW_DEFAULT_CONFIG = {
   bondStages: true,                 // broad relationship stage separate from trajectory/arc
   socialThreads: true,              // track multiple live unresolved social topics
   powerDynamics: true,              // structural/earned leverage guidance
+  bondResilience: true,              // established healthy bonds resist trivial damage without ignoring serious harm
+  castBalance: true,                 // diversify active relationship context across ensemble casts
   adaptiveProtocol: true,           // shrink/expand hidden protocol to available context
   maxArchiveAnchors: 600,           // global durable turning-point archive cap
   scenarioMode: "AUTO",           // AUTO or an explicit scenario profile
@@ -55,6 +59,7 @@ const CW_DEFAULT_CONFIG = {
   allowOffscreenTwists: false,
   twistSceneWindow: 2,               // automatic twists require a participant in this many recent actions
   twistNeedBias: true,               // bias twist selection toward the bond's current pressure-points
+  twistDiversity: true,                // reduce repeated twist topics even when exact twist IDs differ
   npcInitiative: true,
   enableNpcNpc: true,
   enableRomance: true,
@@ -275,6 +280,22 @@ const CW_ARCHIVE_EVENT_KINDS = [
   "power_abused","scapegoating"
 ];
 
+// Minor friction can dent an established bond without erasing years of history.
+// Serious deception, coercion, abandonment, betrayal and boundary harm are
+// deliberately excluded and therefore never receive this protection.
+const CW_RESILIENCE_FRICTION_EVENTS = [
+  "insult","conflict","suspicion","jealousy_episode","neglect","emotional_withdrawal",
+  "rejection","public_rejection","team_failure","ideological_conflict","command_refused",
+  "responsibility_failed","testimony_challenged","accusation","rumor_or_gossip"
+];
+
+function CW_isHarmfulMetricDelta(metric, delta) {
+  if (!delta) return false;
+  if (["resentment","fear","tension","jealousy"].includes(metric)) return delta > 0;
+  if (["trust","affection","respect","loyalty","openness","attachment"].includes(metric)) return delta < 0;
+  return false;
+}
+
 function CW_shouldArchiveEvent(e) {
   return !!e && (Number(e.severity) >= 3 || CW_ARCHIVE_EVENT_KINDS.includes(String(e.kind || "")));
 }
@@ -312,7 +333,28 @@ function CW_archiveEvents(events) {
   cw.archivedAnchors = cw.archivedAnchors.filter(function (a) { return keep.has(a); });
   cw.archivedAnchors.sort(function (a,b) { return Number(a.turn||0)-Number(b.turn||0); });
   const globalCap = Math.max(200, Math.min(1200, Number(cfg.maxArchiveAnchors) || 600));
-  if (cw.archivedAnchors.length > globalCap) cw.archivedAnchors.splice(0, cw.archivedAnchors.length - globalCap);
+  if (cw.archivedAnchors.length > globalCap) {
+    const newestTurn = cw.archivedAnchors.reduce(function (m,a) { return Math.max(m, Number(a.turn||0)); }, 0);
+    const scored = cw.archivedAnchors.map(function (a) {
+      const impact = CW_eventImpact(a.kind) * (Number(a.severity) || 1);
+      const age = Math.max(0, newestTurn - Number(a.turn || 0));
+      const recency = Math.max(0, 18 - Math.min(18, age / 20));
+      const identity = ["marriage","proposal","commitment","relationship_defined","breakup","betrayal","infidelity","sacrifice","rescue","parenthood_news"].includes(a.kind) ? 12 : 0;
+      return { a:a, pair:CW_key(a.from)+"=>"+CW_key(a.to), score:impact+recency+identity };
+    }).sort(function(x,y){ return (y.score-x.score) || (Number(y.a.turn||0)-Number(x.a.turn||0)); });
+    const selected = [], represented = {};
+    // First preserve one best anchor from as many relationships as possible.
+    for (const x of scored) {
+      if (selected.length >= globalCap) break;
+      if (represented[x.pair]) continue;
+      selected.push(x.a); represented[x.pair] = true;
+    }
+    for (const x of scored) {
+      if (selected.length >= globalCap) break;
+      if (!selected.includes(x.a)) selected.push(x.a);
+    }
+    cw.archivedAnchors = selected.sort(function(a,b){ return Number(a.turn||0)-Number(b.turn||0); });
+  }
 }
 function CW_eventImpact(kind) {
   const effect = CW_EVENT_EFFECTS[kind] || {};
@@ -709,7 +751,7 @@ function CW_recentHistoryText(limit) {
 }
 
 const CW_CONFIG_TITLE = "Crossed Wires Config";
-const CW_CONFIG_MARKER = "CWCFG9";
+const CW_CONFIG_MARKER = "CWCFG10";
 
 function CW_cardKeysText(card) {
   if (!card) return "";
@@ -760,6 +802,8 @@ function CW_defaultConfigEntryFrom(cfg) {
     "Bond Stages: " + (c.bondStages ? "ON" : "OFF"),
     "Social Threads: " + (c.socialThreads ? "ON" : "OFF"),
     "Power Dynamics: " + (c.powerDynamics ? "ON" : "OFF"),
+    "Bond Resilience: " + (c.bondResilience ? "ON" : "OFF"),
+    "Cast Balance: " + (c.castBalance ? "ON" : "OFF"),
     "",
     "[Adaptation]",
     "Scenario Mode: " + c.scenarioMode,
@@ -777,6 +821,7 @@ function CW_defaultConfigEntryFrom(cfg) {
     "Twist Cooldown: " + c.twistCooldownTurns,
     "Twist Scene Window: " + c.twistSceneWindow,
     "Twist Need Bias: " + (c.twistNeedBias ? "ON" : "OFF"),
+    "Twist Diversity: " + (c.twistDiversity ? "ON" : "OFF"),
     "Curveballs: " + (c.enableCurveballs ? "ON" : "OFF"),
     "",
     "[Relationship Scope]",
@@ -832,6 +877,8 @@ function CW_configNotes() {
     "• Bond Stages — ON derives a broad stage such as provisional, developing, established, close, interdependent, fractured, rebuilding or post-relationship.",
     "• Social Threads — ON preserves several live unresolved topics per bond—such as secrecy, responsibility, recognition, grief, boundaries, reliability or reputation—instead of flattening everything into one issue.",
     "• Power Dynamics — ON describes structural authority or leverage from roles and events (boss/employee, handler/asset, captain/crew, blackmail, shared power). It never assumes obedience, attraction or helplessness.",
+    "• Bond Resilience — ON gives mature, healthy, well-established bonds resistance to severity-1 everyday friction. A snappy argument can still raise tension, but it will not erase years of trust. Betrayal, coercion, serious deception, abandonment and boundary harm are never softened by resilience.",
+    "• Cast Balance — ON tries to represent different people in ensemble scenes before spending multiple context slots on several bonds involving the same NPC. OFF uses pure relevance/recency ranking.",
     "",
     "ADAPTATION",
     "• Scenario Mode — AUTO lets Crossed Wires infer the current scenario from plot context, recent story, Story Cards and placeholders. Manual options: UNIVERSAL, ROMANCE, SLICE_OF_LIFE, HORROR, FANTASY, SCI_FI, SUPERHERO, CRIME, MYSTERY, SURVIVAL, POLITICAL, MILITARY, WORKPLACE, SCHOOL, FAMILY, ADVENTURE, COMEDY, HISTORICAL, SPORTS, MEDICAL, LEGAL, ESPIONAGE, CELEBRITY, NAUTICAL, WESTERN, POST_APOCALYPTIC, CYBERPUNK.",
@@ -849,6 +896,7 @@ function CW_configNotes() {
     "• Twist Cooldown — Minimum turns between general twist seeds. 2–30.",
     "• Twist Scene Window — 1–5 recent actions. With Offscreen Twists OFF, at least one member of the chosen relationship must appear inside this tighter window before an automatic twist can target the bond.",
     "• Twist Need Bias — ON biases eligible twists toward the bond’s current needs/arc instead of choosing only by genre and risk. It does not guarantee a particular outcome.",
+    "• Twist Diversity — ON reduces the weight of twist topics that have fired recently, even when a different twist ID would technically pass the normal repeat cooldown. This helps stop several secrecy, jealousy, power or trust twists arriving back-to-back.",
     "• Curveballs — ON permits continuity-safe major-secret and wild-card twists. OFF keeps more structured relationship twists only.",
     "",
     "RELATIONSHIP SCOPE",
@@ -878,8 +926,8 @@ function CW_configNotes() {
     "When the main event ledger eventually fills, major turning points such as commitments, rescues, betrayals, breakups, sacrifices and repair milestones are moved into a compact archive instead of being forgotten with routine old interactions.",
     "",
     "COMMANDS",
-    "!wire NAME • !wires • !wiretwists • !wirestatus • !wireprofile • !wireforget NAME • !wiremerge ALIAS | CANONICAL • !wirerole NAME | ROLE • !wireage NAME | adult/minor/unknown • !wiremute NAME • !wireunmute NAME • !wirepin NAME • !wireunpin NAME • !spark [small|medium|major] • !wirehelp",
-    "Manual !wirerole and !wireage corrections become authoritative locks: later model tags or inference cannot silently overwrite them. !wiremute preserves history but removes an NPC from automatic relationship context/twists. !wirepin keeps an important NPC context-eligible off-screen without bypassing normal safety or twist rules.",
+    "!wire NAME • !wires • !wiretwists • !wirestatus • !wireprofile • !wirecast • !wireforget NAME • !wiremerge ALIAS | CANONICAL • !wirerole NAME | ROLE • !wireunlockrole NAME [| TO] • !wireage NAME | adult/minor/unknown • !wireunlockage NAME • !wiremute NAME • !wireunmute NAME • !wirepin NAME • !wireunpin NAME • !spark [small|medium|major] • !wirehelp",
+    "Manual !wirerole and !wireage corrections become authoritative locks: later model tags or inference cannot silently overwrite them. !wireunlockrole and !wireunlockage release those locks without deleting history. !wiremute preserves history but removes an NPC from automatic relationship context/twists. !wirepin keeps an important NPC context-eligible off-screen without bypassing normal safety or twist rules.",
     "",
     "Internal format marker: " + CW_CONFIG_MARKER
   ].join("\n");
@@ -931,6 +979,8 @@ function CW_configFromEntry(entry) {
   cfg.bondStages = CW_parseBool(map["BOND STAGES"], cfg.bondStages);
   cfg.socialThreads = CW_parseBool(map["SOCIAL THREADS"], cfg.socialThreads);
   cfg.powerDynamics = CW_parseBool(map["POWER DYNAMICS"], cfg.powerDynamics);
+  cfg.bondResilience = CW_parseBool(map["BOND RESILIENCE"], cfg.bondResilience);
+  cfg.castBalance = CW_parseBool(map["CAST BALANCE"], cfg.castBalance);
   cfg.scenarioMode = String(map["SCENARIO MODE"] || cfg.scenarioMode).trim().toUpperCase().replace(/[ -]+/g, "_");
   if (!CW_SCENARIO_MODES.includes(cfg.scenarioMode)) cfg.scenarioMode = "AUTO";
   cfg.adaptationStrength = String(map["ADAPTATION STRENGTH"] || cfg.adaptationStrength).trim().toUpperCase();
@@ -953,6 +1003,7 @@ function CW_configFromEntry(entry) {
   cfg.twistCooldownTurns = CW_readNumber(map["TWIST COOLDOWN"], cfg.twistCooldownTurns, 2, 30);
   cfg.twistSceneWindow = CW_readNumber(map["TWIST SCENE WINDOW"], cfg.twistSceneWindow, 1, 5);
   cfg.twistNeedBias = CW_parseBool(map["TWIST NEED BIAS"], cfg.twistNeedBias);
+  cfg.twistDiversity = CW_parseBool(map["TWIST DIVERSITY"], cfg.twistDiversity);
   cfg.pairTwistCooldownTurns = CW_readNumber(map["PAIR TWIST COOLDOWN"], cfg.pairTwistCooldownTurns, 2, 40);
   cfg.repeatTwistCooldownTurns = CW_readNumber(map["REPEAT TWIST COOLDOWN"], cfg.repeatTwistCooldownTurns, 4, 100);
   cfg.enableCurveballs = CW_parseBool(map["CURVEBALLS"], cfg.enableCurveballs);
@@ -1006,14 +1057,14 @@ function CW_upgradeConfigCard(card) {
   if (!card) return;
   const notes = String(card.description || card.notes || "");
   const cleanIdentity = String(card.title || card.name || "") === CW_CONFIG_TITLE && !CW_cardKeysText(card).includes("__crossed_wires_config__");
-  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 9) return;
+  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 10) return;
   if (cleanIdentity && notes.includes(CW_CONFIG_MARKER)) {
-    if (state.crossedWires) state.crossedWires.configCardVersion = 9;
+    if (state.crossedWires) state.crossedWires.configCardVersion = 10;
     return;
   }
   const migrated = CW_configFromEntry(card.entry);
   CW_writeConfigCard(card, migrated);
-  if (state.crossedWires) state.crossedWires.configCardVersion = 9;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 10;
 }
 
 function CW_ensureConfigCard() {
@@ -1031,11 +1082,11 @@ function CW_ensureConfigCard() {
   try {
     // Newer AI Dungeon builds accept name/title and notes after the documented
     // keys/entry/type arguments. Older builds simply use the first three.
-    const result = addStoryCard("__cw_config_bootstrap_9__", entry, "Custom", CW_CONFIG_TITLE, notes);
+    const result = addStoryCard("__cw_config_bootstrap_10__", entry, "Custom", CW_CONFIG_TITLE, notes);
     if (Number.isFinite(Number(result))) createdIndex = Number(result);
   } catch (e) {
     try {
-      const result = addStoryCard("__cw_config_bootstrap_9__", entry, "Custom");
+      const result = addStoryCard("__cw_config_bootstrap_10__", entry, "Custom");
       if (Number.isFinite(Number(result))) createdIndex = Number(result);
     } catch (fallbackError) {
       if (typeof log === "function") log("Crossed Wires: could not create config card: " + fallbackError);
@@ -1066,7 +1117,7 @@ function CW_ensureConfigCard() {
   card.name = CW_CONFIG_TITLE;
   card.description = notes;
   card.notes = notes;
-  if (state.crossedWires) state.crossedWires.configCardVersion = 9;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 10;
   CW_RUNTIME_CONFIG_CARD = card;
   CW_RUNTIME_CONFIG_CACHE = null;
   CW_RUNTIME_CONFIG_ENTRY = null;
@@ -1894,6 +1945,8 @@ function CW_relationshipFlags(events) {
 
 function CW_invalidateEventIndex() {
   CW_RUNTIME_EVENT_INDEX = null;
+  CW_RUNTIME_PAIR_CACHE = null;
+  CW_RUNTIME_RELEVANT_CACHE = null;
 }
 
 function CW_eventIndex() {
@@ -2105,6 +2158,16 @@ function CW_powerDynamic(role, events, scores) {
   return structural;
 }
 
+function CW_bondResilienceLevel(scores, familiarity, flags, shockActive) {
+  if (shockActive || !scores) return "fragile";
+  if (flags && ((flags.betrayalScars || 0) + (flags.abandonmentScars || 0) + (flags.boundaryScars || 0) > 0)) return "fragile";
+  const core = ((scores.trust || 0) + (scores.affection || 0) + (scores.respect || 0) + (scores.loyalty || 0)) / 4;
+  if (familiarity >= 76 && core >= 38) return "very resilient";
+  if (familiarity >= 45 && core >= 16) return "resilient";
+  if (familiarity >= 28 && core >= 10) return "developing resilience";
+  return "fragile";
+}
+
 function CW_needContextText(link, maxCount) {
   if (!link || !Array.isArray(link.needs)) return "";
   const max = Math.max(1, Math.min(3, Number(maxCount) || 2));
@@ -2135,6 +2198,7 @@ function CW_computeLink(from, to, turn) {
   let lastTurn = events[0].turn;
   const recentGroupTurn = {};
   const recentKindTurn = {};
+  let processedCount = 0;
   const paceUp = cfg.relationshipPace === "FAST" ? 1.22 : (cfg.relationshipPace === "BALANCED" ? 1.0 : 0.78);
   const paceDown = cfg.relationshipPace === "FAST" ? 1.06 : (cfg.relationshipPace === "BALANCED" ? 1.0 : 0.92);
 
@@ -2162,10 +2226,19 @@ function CW_computeLink(from, to, turn) {
       recentKindTurn[e.kind] = e.turn;
     }
 
+    const preEventCore = ((scores.trust || 0) + (scores.affection || 0) + (scores.respect || 0) + (scores.loyalty || 0)) / 4;
+    let resilienceFactor = 1.0;
+    if (cfg.bondResilience && e.severity === 1 && e.turn >= matureAt && processedCount >= 6 && shockUntil < e.turn && (betrayalScars + abandonmentScars + boundaryScars) === 0 && CW_RESILIENCE_FRICTION_EVENTS.includes(e.kind)) {
+      if (preEventCore >= 38) resilienceFactor = 0.52;
+      else if (preEventCore >= 16) resilienceFactor = 0.68;
+      else if (preEventCore >= 10) resilienceFactor = 0.84;
+    }
+
     for (const metric in effect) {
       let delta = effect[metric] * severityMultiplier * incubationMultiplier * noveltyMultiplier;
       delta *= delta >= 0 ? paceUp : paceDown;
       const current = scores[metric] || 0;
+      if (resilienceFactor < 1 && CW_isHarmfulMetricDelta(metric, delta)) delta *= resilienceFactor;
 
       // Severe relationship damage creates a short shock window. Small warmth,
       // banter or reassurance may cool tension, but should not instantly restore
@@ -2206,6 +2279,7 @@ function CW_computeLink(from, to, turn) {
       shockKind = e.kind;
     }
     if (["trust_repair","boundary_repair","abandonment_repair","reconciliation"].includes(e.kind) && e.severity >= 2) shockUntil = Math.min(shockUntil, Number(e.turn) + 2);
+    processedCount++;
   }
 
   CW_applyPassiveDecay(scores, turn - lastTurn);
@@ -2227,6 +2301,7 @@ function CW_computeLink(from, to, turn) {
   const stage = cfg.bondStages ? CW_bondStage(scores, flags, familiarity, events, arc) : "";
   const threads = cfg.socialThreads ? CW_liveThreads(scores, flags, events, role) : [];
   const power = cfg.powerDynamics ? CW_powerDynamic(role, events, scores) : "";
+  const resilience = cfg.bondResilience ? CW_bondResilienceLevel(scores, familiarity, flags, cfg.emotionalInertia && turn <= shockUntil) : "";
   const result = {
     from: events[events.length - 1].from,
     to: events[events.length - 1].to,
@@ -2243,6 +2318,7 @@ function CW_computeLink(from, to, turn) {
     trustDomains: domains,
     threads: threads,
     power: power,
+    resilience: resilience,
     shockActive: cfg.emotionalInertia && turn <= shockUntil,
     shockKind: shockKind,
     unresolved: CW_unresolvedThread(scores, flags, events),
@@ -2254,14 +2330,17 @@ function CW_computeLink(from, to, turn) {
 }
 
 function CW_pairKeys() {
-  const seen = {};
+  if (CW_RUNTIME_PAIR_CACHE) return CW_RUNTIME_PAIR_CACHE;
   const pairs = [];
-  const combined = (state.crossedWires.archivedAnchors || []).concat(state.crossedWires.ledger || []);
+  const seen = {};
+  const cw = state.crossedWires;
+  const combined = (cw.archivedAnchors || []).concat(cw.ledger || []);
   for (const e of combined) {
     if (!e) continue;
     const key = CW_key(e.from) + "=>" + CW_key(e.to);
     if (!seen[key]) { seen[key] = true; pairs.push({ from: e.from, to: e.to }); }
   }
+  CW_RUNTIME_PAIR_CACHE = pairs;
   return pairs;
 }
 
@@ -2419,6 +2498,7 @@ function CW_provisionalSceneLine(turn) {
 }
 
 function CW_relevantLinks(turn) {
+  if (CW_RUNTIME_RELEVANT_CACHE && CW_RUNTIME_RELEVANT_CACHE.turn === Number(turn)) return CW_RUNTIME_RELEVANT_CACHE.links;
   const cfg = CW_config();
   const sceneScores = CW_sceneNameScores();
   const links = [];
@@ -2436,7 +2516,33 @@ function CW_relevantLinks(turn) {
     links.push(link);
   }
   links.sort(function (a, b) { return (b.sceneRelevance - a.sceneRelevance) || (b.lastChanged - a.lastChanged); });
-  return links.slice(0, cfg.maxContextRelationships);
+  if (!cfg.castBalance || links.length <= cfg.maxContextRelationships) {
+    const out = links.slice(0, cfg.maxContextRelationships);
+    CW_RUNTIME_RELEVANT_CACHE = { turn:Number(turn), links:out };
+    return out;
+  }
+
+  // Ensemble fairness: first spend slots on bonds that introduce a participant
+  // not represented yet, then fill remaining slots by normal relevance. This
+  // avoids six context slots all orbiting one highly-mentioned NPC.
+  const chosen = [];
+  const represented = {};
+  for (const link of links) {
+    if (chosen.length >= cfg.maxContextRelationships) break;
+    const fk = CW_resolveNpcKey(link.from) || CW_key(link.from);
+    const tk = CW_key(link.to) === "you" ? "you" : (CW_resolveNpcKey(link.to) || CW_key(link.to));
+    const introduces = !represented[fk] || (tk !== "you" && !represented[tk]);
+    if (!introduces) continue;
+    chosen.push(link);
+    represented[fk] = true;
+    if (tk !== "you") represented[tk] = true;
+  }
+  for (const link of links) {
+    if (chosen.length >= cfg.maxContextRelationships) break;
+    if (!chosen.includes(link)) chosen.push(link);
+  }
+  CW_RUNTIME_RELEVANT_CACHE = { turn:Number(turn), links:chosen };
+  return chosen;
 }
 
 function CW_groupDynamicsLine(links) {
@@ -2549,6 +2655,43 @@ function CW_twistNeedFactor(t, link, cfg) {
   return Math.max(0.35, Math.min(3.2, factor));
 }
 
+function CW_twistTopic(twist) {
+  const id = String((twist && twist.id) || twist || "");
+  const groups = [
+    ["trust", /trust|loyalty|depend|responsib|protect|reliab/i],
+    ["secrecy", /secret|confid|cover|withheld|identity|informant|blackmail/i],
+    ["boundaries", /boundar|distance|space|professional_boundary|ethical/i],
+    ["romance", /confession|relationship|jealous|triangle|old_flame|proposal|intimacy|temptation|infidelity|casual|future_mismatch/i],
+    ["power", /power|leadership|command|rank|captain|promotion|authority|mutiny/i],
+    ["rivalry", /rival|competition|credit|performance|recognition/i],
+    ["family", /family|favorit|parent|sibling|expectation/i],
+    ["public", /public|scandal|reputation|fame|scapegoat|rumor/i],
+    ["grief", /grief|survivor|trauma|loss/i],
+    ["resources", /resource|suppl|ration|scarcity/i]
+  ];
+  for (const pair of groups) if (pair[1].test(id)) return pair[0];
+  return "general";
+}
+
+function CW_twistDiversityFactor(twist, turn, cfg) {
+  if (!cfg.twistDiversity) return 1;
+  const topic = CW_twistTopic(twist);
+  const history = (state.crossedWires.twist.history || []).slice(-20);
+  let factor = 1;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i];
+    if (!h) continue;
+    const hTopic = h.topic || CW_twistTopic(h.id);
+    if (hTopic !== topic) continue;
+    const gap = Math.max(0, Number(turn) - Number(h.turn || 0));
+    if (gap <= 6) factor *= h.used ? 0.42 : 0.65;
+    else if (gap <= 12) factor *= h.used ? 0.64 : 0.80;
+    else if (gap <= 20) factor *= 0.86;
+    break;
+  }
+  return Math.max(0.30, factor);
+}
+
 function CW_twistCandidates(link, cfg, turn, forcedTier) {
   if (CW_isMutedName(link.from) || (link.to !== "YOU" && CW_isMutedName(link.to))) return [];
   const defaultMax = { OFF: 2, GROUNDED: 2, DRAMATIC: 3, WILD: 4, UNHINGED: 4 }[cfg.twistMode] || 3;
@@ -2599,6 +2742,7 @@ function CW_twistCandidates(link, cfg, turn, forcedTier) {
     let weight = t.weight || 1;
     weight *= CW_twistProfileFactor(t, profile, cfg);
     weight *= CW_twistNeedFactor(t, link, cfg);
+    weight *= CW_twistDiversityFactor(t, turn, cfg);
     if (CW_PROFESSIONAL_ROLES.includes(role) && t.romantic && !link.flags.defined && link.scores.attraction < 30) weight *= 0.35;
     if (["romantic", "ex"].includes(role) && t.romantic) weight *= 1.6;
     if (["rival", "enemy"].includes(role) && ["rivalry_shift", "loyalty_test", "public_choice"].includes(t.id)) weight *= 1.5;
@@ -2712,6 +2856,7 @@ function CW_maybeArmTwist(turn) {
   tw.pending = {
     token: "T" + turn + "_" + Math.floor(CW_rand() * 1000000),
     id: idea.id,
+    topic: CW_twistTopic(idea),
     text: idea.text,
     risk: idea.risk || 2,
     from: link.from,
@@ -2758,28 +2903,39 @@ function CW_anchorMemories(link, maxCount) {
   const significantKinds = [
     "confession", "relationship_defined", "exclusivity", "commitment", "proposal", "marriage",
     "rescue", "sacrifice", "betrayal", "infidelity", "breakup", "abandonment",
-    "boundary_violated", "reconciliation", "parenthood_news",
+    "boundary_violated", "reconciliation", "parenthood_news", "power_abused", "scapegoating",
     "trust_repair", "boundary_repair", "abandonment_repair"
   ];
   const candidates = events.filter(function (e) {
     return e && e.turn !== newestTurn && (e.severity >= 3 || significantKinds.includes(e.kind));
   });
-  const chosen = [];
-  let pos = null, neg = null;
-  for (let i = candidates.length - 1; i >= 0; i--) {
-    const e = candidates[i];
-    const v = CW_eventValence(e);
-    if (!pos && v >= 4) pos = e;
-    if (!neg && v <= -4) neg = e;
-    if (pos && neg) break;
+  if (!candidates.length) return [];
+
+  // Score turning points by impact, severity, recency and unresolved relevance,
+  // then prefer different social event families so the summary does not spend
+  // all anchor slots repeating three versions of the same betrayal/commitment.
+  const latestTurn = events.length ? Number(events[events.length - 1].turn || 0) : CW_turn();
+  const ranked = candidates.map(function (e) {
+    const age = Math.max(0, latestTurn - Number(e.turn || 0));
+    const recency = Math.max(0, 12 - Math.min(12, age / 8));
+    const impact = Math.min(28, CW_eventImpact(e.kind));
+    const severity = (Number(e.severity) || 1) * 9;
+    const unresolvedBonus = ["betrayal","infidelity","breakup","abandonment","boundary_violated","power_abused","scapegoating"].includes(e.kind) ? 8 : 0;
+    return { e:e, group:CW_eventGroup(e.kind), score:impact + severity + recency + unresolvedBonus };
+  }).sort(function (a,b) { return (b.score-a.score) || (Number(b.e.turn||0)-Number(a.e.turn||0)); });
+
+  const chosen = [], groups = {};
+  for (const r of ranked) {
+    if (chosen.length >= max) break;
+    if (groups[r.group]) continue;
+    chosen.push(r.e);
+    groups[r.group] = true;
   }
-  if (neg) chosen.push(neg);
-  if (pos && (!neg || pos.turn !== neg.turn || pos.kind !== neg.kind)) chosen.push(pos);
-  for (let i = candidates.length - 1; i >= 0 && chosen.length < max; i--) {
-    const e = candidates[i];
-    if (!chosen.includes(e)) chosen.push(e);
+  for (const r of ranked) {
+    if (chosen.length >= max) break;
+    if (!chosen.includes(r.e)) chosen.push(r.e);
   }
-  return chosen.slice(0, max).sort(function (a, b) { return a.turn - b.turn; });
+  return chosen.sort(function (a,b) { return Number(a.turn||0)-Number(b.turn||0); });
 }
 
 function CW_anchorText(link, cfg) {
@@ -2806,6 +2962,7 @@ function CW_relationshipContextLine(link, turn) {
   if (cfg.trustDomains && link.trustDomains) { const td = CW_trustDomainText(link.trustDomains); if (td) line += " Trust domains: " + td + "."; }
   if (cfg.socialThreads && link.threads && link.threads.length) line += " Live threads: " + link.threads.slice(0,2).map(function(x){return x.label;}).join(", ") + ".";
   if (cfg.powerDynamics && link.power && link.power !== "balanced") line += " Power: " + link.power + ".";
+  if (cfg.bondResilience && ["resilient","very resilient"].includes(link.resilience)) line += " Bond resilience: established history should survive minor friction.";
   if (link.shockActive) line += " Recent major damage still has emotional inertia; small positive beats should not reset the bond.";
   if (link.flags.betrayalScars || link.flags.abandonmentScars || link.flags.boundaryScars) line += " Durable relationship damage remains and requires earned repair.";
   if (link.unresolved) line += " Unresolved: " + link.unresolved + ".";
@@ -3077,7 +3234,7 @@ function CW_prepareRetryContext(turn) {
       cw.twist.pending = {
         token: "R" + turn + "_" + Math.floor(CW_rand() * 1000000),
         id: idea.id, text: idea.text, risk: previousTwist.risk || idea.risk || 2,
-        from: previousTwist.from, to: previousTwist.to, pairKey: previousTwist.pairKey,
+        from: previousTwist.from, to: previousTwist.to, pairKey: previousTwist.pairKey, topic: previousTwist.topic || CW_twistTopic(previousTwist.id),
         profile: previousTwist.profile || "UNIVERSAL", armedAt: turn, forced: !!previousTwist.forced, retry: true
       };
     }
@@ -3138,7 +3295,7 @@ function CW_parseModelOutput(text, turn) {
     const twistRegex = new RegExp("\\[\\[CW_TWIST\\|" + tokenEscaped + "\\|USED\\]\\]", "i");
     used = twistRegex.test(raw);
     tw.history.push({
-      turn: turn, id: tw.pending.id, risk: tw.pending.risk || 2,
+      turn: turn, id: tw.pending.id, topic: tw.pending.topic || CW_twistTopic(tw.pending.id), risk: tw.pending.risk || 2,
       from: tw.pending.from, to: tw.pending.to, pairKey: tw.pending.pairKey, profile: tw.pending.profile || "UNIVERSAL",
       used: used, forced: !!tw.pending.forced
     });
@@ -3240,10 +3397,64 @@ function CW_setNpcCastFlag(name, kind, enabled) {
   if (!state.crossedWires.npcs[key]) return "";
   const bucket = kind === "pin" ? state.crossedWires.pinnedNpcs : state.crossedWires.mutedNpcs;
   if (enabled) bucket[key] = { turn:CW_turn() }; else delete bucket[key];
+  CW_RUNTIME_RELEVANT_CACHE = null;
   return state.crossedWires.npcs[key].name || clean;
 }
 function CW_isMutedName(name) { const key=CW_resolveNpcKey(name)||CW_key(name); return !!(key && state.crossedWires.mutedNpcs[key]); }
 function CW_isPinnedName(name) { const key=CW_resolveNpcKey(name)||CW_key(name); return !!(key && state.crossedWires.pinnedNpcs[key]); }
+
+function CW_unlockAge(name) {
+  const clean = CW_resolveNpcName(name) || CW_cleanName(name);
+  if (!clean || CW_isPlayerName(clean)) return "";
+  const key = CW_resolveNpcKey(clean) || CW_key(clean);
+  if (!state.crossedWires.npcs[key]) return "";
+  delete state.crossedWires.manualAgeLocks[key];
+  return state.crossedWires.npcs[key].name || clean;
+}
+
+function CW_unlockRole(fromName, toName) {
+  const from = CW_resolveNpcName(fromName) || CW_cleanName(fromName);
+  const to = !toName || CW_key(toName) === "you" ? "YOU" : (CW_resolveNpcName(toName) || CW_cleanName(toName));
+  if (!from || !to || CW_isPlayerName(from)) return false;
+  const fk = CW_key(CW_resolveNpcName(from) || from);
+  const tk = to === "YOU" ? "you" : CW_key(CW_resolveNpcName(to) || to);
+  const key = fk + "->" + tk;
+  const prior = state.crossedWires.manualRoleLocks[key];
+  delete state.crossedWires.manualRoleLocks[key];
+  if (to !== "YOU" && prior && CW_ROLE_INVERSE[prior.role]) delete state.crossedWires.manualRoleLocks[tk + "->" + fk];
+  return !!prior;
+}
+
+function CW_castStatus() {
+  const cw = state.crossedWires;
+  const lines = ["CROSSED WIRES — CAST CONTROLS"];
+  function namesFrom(bucket) {
+    return Object.keys(bucket || {}).map(function(k){ return cw.npcs[k] && cw.npcs[k].name ? cw.npcs[k].name : k; }).sort();
+  }
+  const pinned = namesFrom(cw.pinnedNpcs), muted = namesFrom(cw.mutedNpcs);
+  lines.push("Pinned: " + (pinned.length ? pinned.join(", ") : "none"));
+  lines.push("Muted: " + (muted.length ? muted.join(", ") : "none"));
+  const age = Object.keys(cw.manualAgeLocks || {}).map(function(k){
+    const n = cw.npcs[k] && cw.npcs[k].name ? cw.npcs[k].name : k;
+    return n + "=" + cw.manualAgeLocks[k].status;
+  }).sort();
+  lines.push("Manual age locks: " + (age.length ? age.join(" • ") : "none"));
+  const roles = Object.keys(cw.manualRoleLocks || {}).filter(function(k){
+    const bits=k.split("->");
+    if (bits.length!==2) return false;
+    const inv=cw.manualRoleLocks[bits[1]+"->"+bits[0]];
+    // Avoid printing both halves of an automatically locked inverse pair.
+    return bits[1] === "you" || !inv || k < (bits[1]+"->"+bits[0]);
+  }).map(function(k){
+    const bits=k.split("->"), rec=cw.manualRoleLocks[k];
+    const from=cw.npcs[bits[0]]&&cw.npcs[bits[0]].name?cw.npcs[bits[0]].name:bits[0];
+    const to=bits[1]==="you"?"YOU":(cw.npcs[bits[1]]&&cw.npcs[bits[1]].name?cw.npcs[bits[1]].name:bits[1]);
+    return from+" → "+to+"="+(rec.role||"unknown");
+  }).sort();
+  lines.push("Manual role locks: " + (roles.length ? roles.join(" • ") : "none"));
+  lines.push("Tip: pin keeps continuity available off-screen; mute preserves history but removes automatic context/twists. Unlock commands release manual corrections without deleting history.");
+  return lines.join("\n");
+}
 
 function CW_dashboard(filterName) {
   const cfg = CW_config();
@@ -3274,6 +3485,7 @@ function CW_dashboard(filterName) {
     if (cfg.trustDomains && link.trustDomains) lines.push("Trust domains: " + CW_trustDomainText(link.trustDomains));
     if (cfg.socialThreads && link.threads && link.threads.length) lines.push("Live threads: " + link.threads.slice(0,3).map(function(x){return x.label;}).join(" • "));
     if (cfg.powerDynamics && link.power && link.power !== "balanced") lines.push("Power: " + link.power);
+    if (cfg.bondResilience && link.resilience) lines.push("Bond resilience: " + link.resilience);
     if (link.shockActive) lines.push("Emotional inertia: active after " + String(link.shockKind || "major damage").replace(/_/g," ") + ".");
     if (cfg.showExactNumbersInDashboard) lines.push(CW_scoreText(link.scores));
     if (link.flags.betrayalScars || link.flags.abandonmentScars || link.flags.boundaryScars) {
@@ -3306,7 +3518,7 @@ function CW_twistHistory() {
   const lines = ["CROSSED WIRES — RECENT TWISTS"];
   if (!h.length) return lines.concat(["No twist seeds have fired yet."]).join("\n");
   for (const t of h.slice(-15).reverse()) {
-    lines.push("Turn " + t.turn + ": " + t.id.replace(/_/g, " ") + " [risk " + (t.risk || 2) + "]" + (t.profile ? " [" + t.profile + "]" : "") + " — " + t.from + " ↔ " + t.to + (t.used ? " [used]" : " [skipped]") + (t.forced ? " [forced]" : ""));
+    lines.push("Turn " + t.turn + ": " + t.id.replace(/_/g, " ") + " [" + (t.topic || CW_twistTopic(t.id)) + ", risk " + (t.risk || 2) + "]" + (t.profile ? " [" + t.profile + "]" : "") + " — " + t.from + " ↔ " + t.to + (t.used ? " [used]" : " [skipped]") + (t.forced ? " [forced]" : ""));
   }
   return lines.join("\n");
 }
@@ -3316,7 +3528,7 @@ function CW_configIssues() {
   if (!card || !card.entry) return ["Config card is missing; defaults are being used."];
   const map = CW_configMap(card.entry);
   const issues = [];
-  const boolKeys = ["ENABLED", "NPC INITIATIVE", "ARC GUIDANCE", "RELATIONSHIP NEEDS", "GROUP DYNAMICS", "REPETITION DAMPING", "EMOTIONAL INERTIA", "TRUST DOMAINS", "BOND STAGES", "SOCIAL THREADS", "POWER DYNAMICS", "ROLE AWARENESS", "ROLE INFERENCE", "SCENARIO TWISTS", "OFFSCREEN TWISTS", "TWIST NEED BIAS", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "ADAPTIVE PROTOCOL", "DASHBOARD NUMBERS"];
+  const boolKeys = ["ENABLED", "NPC INITIATIVE", "ARC GUIDANCE", "RELATIONSHIP NEEDS", "GROUP DYNAMICS", "REPETITION DAMPING", "EMOTIONAL INERTIA", "TRUST DOMAINS", "BOND STAGES", "SOCIAL THREADS", "POWER DYNAMICS", "BOND RESILIENCE", "CAST BALANCE", "ROLE AWARENESS", "ROLE INFERENCE", "SCENARIO TWISTS", "OFFSCREEN TWISTS", "TWIST NEED BIAS", "TWIST DIVERSITY", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "ADAPTIVE PROTOCOL", "DASHBOARD NUMBERS"];
   const boolValues = ["on", "yes", "true", "1", "enabled", "enable", "off", "no", "false", "0", "disabled", "disable"];
   for (const key of boolKeys) {
     if (map[key] == null) issues.push("Missing " + key.toLowerCase() + " (default used)");
@@ -3369,9 +3581,10 @@ function CW_status() {
     "Scenario mode: " + cfg.scenarioMode + " | profile stability: " + cfg.profileStabilityTurns + " | detected: " + (CW_currentScenarioProfile().primary || "UNIVERSAL") + (CW_currentScenarioProfile().secondary ? " + " + CW_currentScenarioProfile().secondary : "") + " | adaptation: " + cfg.adaptationStrength,
     "Role awareness: " + (cfg.roleAwareness ? "ON" : "OFF") + " | role inference: " + (cfg.deterministicRoleInference ? "ON" : "OFF") + " | scenario twists: " + (cfg.enableScenarioTwists ? "ON" : "OFF") + " | offscreen twists: " + (cfg.allowOffscreenTwists ? "ON" : "OFF"),
     "Arc guidance: " + (cfg.arcGuidance ? "ON" : "OFF") + " | relationship needs: " + (cfg.needGuidance ? "ON" : "OFF") + " | group dynamics: " + (cfg.groupDynamics ? "ON" : "OFF") + " | repetition damping: " + (cfg.repetitionDamping ? "ON" : "OFF"),
-    "Emotional inertia: " + (cfg.emotionalInertia ? "ON (" + cfg.shockWindowTurns + " turns)" : "OFF") + " | trust domains: " + (cfg.trustDomains ? "ON" : "OFF") + " | bond stages: " + (cfg.bondStages ? "ON" : "OFF") + " | threads: " + (cfg.socialThreads ? "ON" : "OFF") + " | power: " + (cfg.powerDynamics ? "ON" : "OFF"),
+    "Emotional inertia: " + (cfg.emotionalInertia ? "ON (" + cfg.shockWindowTurns + " turns)" : "OFF") + " | bond resilience: " + (cfg.bondResilience ? "ON" : "OFF") + " | trust domains: " + (cfg.trustDomains ? "ON" : "OFF") + " | stages: " + (cfg.bondStages ? "ON" : "OFF") + " | threads: " + (cfg.socialThreads ? "ON" : "OFF") + " | power: " + (cfg.powerDynamics ? "ON" : "OFF"),
     "Cast controls: " + Object.keys(cw.pinnedNpcs || {}).length + " pinned | " + Object.keys(cw.mutedNpcs || {}).length + " muted | manual locks: " + (Object.keys(cw.manualRoleLocks || {}).length + Object.keys(cw.manualAgeLocks || {}).length),
-    "Observation: " + cfg.observationTurns + " turns + " + cfg.observationAppearances + " appearances | active bonds: " + cfg.maxContextRelationships + " | memory anchors: " + cfg.memoryAnchors,
+    "Observation: " + cfg.observationTurns + " turns + " + cfg.observationAppearances + " appearances | active bonds: " + cfg.maxContextRelationships + " | cast balance: " + (cfg.castBalance ? "ON" : "OFF") + " | memory anchors: " + cfg.memoryAnchors,
+    "Twist intelligence: need bias " + (cfg.twistNeedBias ? "ON" : "OFF") + " | diversity " + (cfg.twistDiversity ? "ON" : "OFF"),
     "Context budget: " + cfg.contextBudgetChars + " chars | scene window: " + cfg.sceneHistoryActions + " actions | twist scene window: " + cfg.twistSceneWindow,
     (function () { const e = CW_runtimeEnvironment(); return "Runtime: " + (e.modelName || "model unknown") + (e.modelVersion ? " " + e.modelVersion : "") + " | optimized/cache-efficient: " + (e.useCacheEfficient ? "YES" : "NO") + (e.maxChars ? " | max chars " + e.maxChars : ""); })(),
     "Mature themes: " + (cfg.enableMatureThemes ? "ON" : "OFF") + " | adult intimacy: " + (cfg.enableAdultIntimacy ? "ON" : "OFF") + " | infidelity: " + (cfg.enableInfidelity ? "ON" : "OFF"),
@@ -3407,10 +3620,13 @@ function CW_help() {
     "!wiretwists       — show recent twist seeds and whether the narrator used them",
     "!wirestatus       — show engine/config status",
     "!wireprofile      — show the detected/adaptive scenario profile",
+    "!wirecast         — show pinned/muted NPCs and manual role/age locks",
     "!wireforget NAME  — remove one NPC and all tracked relationship history involving them",
     "!wiremerge ALIAS | CANONICAL — merge duplicate/alias NPC identities without losing history",
     "!wirerole NAME | ROLE — manually set and LOCK NAME → YOU role; or FROM | TO | ROLE for NPC→NPC",
+    "!wireunlockrole NAME — release NAME → YOU role lock; or FROM | TO for NPC→NPC",
     "!wireage NAME | adult/minor/unknown — correct and LOCK one NPC's age status used by adult-only gating",
+    "!wireunlockage NAME — release the manual age lock while keeping the current age status",
     "!wiremute NAME     — keep history but remove an NPC from automatic context/twists",
     "!wireunmute NAME   — restore a muted NPC",
     "!wirepin NAME      — keep an important NPC context-eligible while off-screen",
@@ -3442,6 +3658,12 @@ function CW_readCommand(text) {
   if (m) return { type: "role", from: CW_commandNameArg(m[1]), to: CW_commandNameArg(m[2]), role: String(m[3]).trim() };
   m = s.match(/^!wirerole\s+(.+?)\s*\|\s*([a-z_ -]+)\s*$/i);
   if (m) return { type: "role", from: CW_commandNameArg(m[1]), to: "YOU", role: String(m[2]).trim() };
+  m = s.match(/^!wireunlockage\s+(.+?)\s*$/i);
+  if (m) return { type: "unlockage", name: CW_commandNameArg(m[1]) };
+  m = s.match(/^!wireunlockrole\s+(.+?)\s*\|\s*(.+?)\s*$/i);
+  if (m) return { type: "unlockrole", from: CW_commandNameArg(m[1]), to: CW_commandNameArg(m[2]) };
+  m = s.match(/^!wireunlockrole\s+(.+?)\s*$/i);
+  if (m) return { type: "unlockrole", from: CW_commandNameArg(m[1]), to: "YOU" };
   m = s.match(/^!wiremute\s+(.+?)\s*$/i);
   if (m) return { type: "mute", name: CW_commandNameArg(m[1]) };
   m = s.match(/^!wireunmute\s+(.+?)\s*$/i);
@@ -3454,6 +3676,7 @@ function CW_readCommand(text) {
   if (m) return { type: "forget", name: CW_commandNameArg(m[1]) };
   m = s.match(/^!wire\s+(.+?)\s*$/i);
   if (m) return { type: "one", name: CW_commandNameArg(m[1]) };
+  if (/^!wirecast\s*$/i.test(s)) return { type: "cast" };
   if (/^!wires\s*$/i.test(s)) return { type: "all" };
   if (/^!wiretwists\s*$/i.test(s)) return { type: "twists" };
   if (/^!wirestatus\s*$/i.test(s)) return { type: "status" };
@@ -3493,6 +3716,8 @@ function CW_onInput(text) {
   CW_RUNTIME_PROFILE_CACHE = null;
   CW_RUNTIME_ENV_CACHE = null;
   CW_RUNTIME_LINK_CACHE = null;
+  CW_RUNTIME_PAIR_CACHE = null;
+  CW_RUNTIME_RELEVANT_CACHE = null;
   CW_ensureConfigCard();
   const turn = CW_turn();
   CW_handleUndo(turn);
@@ -3524,6 +3749,8 @@ function CW_onContext(text) {
   CW_RUNTIME_PROFILE_CACHE = null;
   CW_RUNTIME_ENV_CACHE = null;
   CW_RUNTIME_LINK_CACHE = null;
+  CW_RUNTIME_PAIR_CACHE = null;
+  CW_RUNTIME_RELEVANT_CACHE = null;
   CW_ensureConfigCard();
   const turn = CW_turn();
   CW_handleUndo(turn);
@@ -3550,6 +3777,8 @@ function CW_onOutput(text) {
   CW_RUNTIME_PROFILE_CACHE = null;
   CW_RUNTIME_ENV_CACHE = null;
   CW_RUNTIME_LINK_CACHE = null;
+  CW_RUNTIME_PAIR_CACHE = null;
+  CW_RUNTIME_RELEVANT_CACHE = null;
   CW_ensureConfigCard();
   const turn = CW_turn();
   CW_handleUndo(turn);
@@ -3562,6 +3791,15 @@ function CW_onOutput(text) {
     if (cmd.type === "twists") return CW_twistHistory();
     if (cmd.type === "status") return CW_status();
     if (cmd.type === "profile") return CW_profileStatus();
+    if (cmd.type === "cast") return CW_castStatus();
+    if (cmd.type === "unlockage") {
+      const changed = CW_unlockAge(cmd.name);
+      return changed ? "Crossed Wires: released the manual age lock for " + changed + ". Current age status is preserved until future evidence changes it." : "Crossed Wires: no tracked NPC matched '" + cmd.name + "'.";
+    }
+    if (cmd.type === "unlockrole") {
+      const ok = CW_unlockRole(cmd.from, cmd.to);
+      return ok ? "Crossed Wires: released the manual role lock for " + cmd.from + " → " + (cmd.to || "YOU") + ". Existing role history is preserved." : "Crossed Wires: no matching manual role lock was found.";
+    }
     if (["mute","unmute","pin","unpin"].includes(cmd.type)) {
       const kind = (cmd.type === "pin" || cmd.type === "unpin") ? "pin" : "mute";
       const enabled = cmd.type === "pin" || cmd.type === "mute";
