@@ -1,1292 +1,258 @@
-⚡ Crossed Wires
+CROSSED WIRES
+Adaptive Relationship Engine for AI Dungeon
+============================================
 
-An adaptive relationship engine for AI Dungeon
+Crossed Wires is designed to make characters remember each other rather than merely remember facts.
 
-Crossed Wires makes characters remember each other.
+It tracks directional NPC relationships, interprets meaningful social events, preserves major turning points, adapts to the scenario, and injects only the relationship continuity that matters to the current scene.
 
-It tracks how NPC relationships change over time, remembers important moments, understands different kinds of bonds, adapts to the scenario you’re playing, and quietly feeds that history back into the story.
+The model identifies story-supported relationship evidence. JavaScript owns the persistent mechanics.
 
-It isn’t just a romance system.
+CORE MODEL
+----------
+Crossed Wires tracks 11 relationship pressures:
 
-You can drop it into a superhero scenario, zombie apocalypse, fantasy kingdom, workplace drama, military campaign, murder mystery, family story, school scenario, political thriller or almost anything else and let it adapt.
+Trust • Affection • Respect • Loyalty • Openness • Attachment • Attraction • Jealousy • Resentment • Fear • Tension
 
-⸻
+Relationships are directional:
 
-✨ What Crossed Wires Does
+Mara → YOU can be very different from Leo → YOU.
+Mara → Leo can be different from Leo → Mara.
 
-AI Dungeon can be great at individual scenes, but relationships can sometimes lose continuity over a long adventure.
+The script never creates YOU → NPC emotional state. The player character's thoughts, feelings, consent, commitments and decisions stay with the player.
 
-A character might:
+WHAT MAKES IT DIFFERENT
+-----------------------
 
-* trust you with their life
-* discover you lied to them
-* fall out with you
-* slowly forgive you
-* fight beside you again
+1. RELATIONSHIP HISTORY, NOT A SINGLE SCORE
+A bond can carry strong affection and resentment at once, loyalty despite anger, attraction despite distrust, or respect between enemies.
 
-…and eventually some of that history can get lost.
+2. BOND STAGES + ARCS
+Relationships can be provisional, developing, established, close, interdependent, fractured, rebuilding or post-relationship, while separately following arcs such as repair, rivalry, family strain, professional tension or slow-burn chemistry.
 
-Crossed Wires keeps its own persistent relationship history so those moments continue to matter.
+3. TRUST DOMAINS
+Crossed Wires can distinguish personal trust, operational reliability, confidentiality and judgment. Somebody can be trusted in a firefight but not with a secret.
 
-The aim isn’t to control the story.
+4. SOCIAL THREADS / NEEDS
+A bond can have several unresolved areas at once: trust, secrecy, boundaries, responsibility, reputation, grief, autonomy, jealousy, rivalry or relationship clarity.
 
-The aim is to give the AI enough memory to write characters who feel like they’ve actually lived through it.
+5. EMOTIONAL INERTIA
+Severe betrayal, abandonment, coercion and boundary damage create resistance to instant positive rebound. An apology can cool heat without restoring deep trust.
 
-⸻
+6. BOND RESILIENCE
+The reverse is also true. A healthy relationship with real history should not collapse because of one severity-1 argument. Minor friction lands, but established trust gives the bond realistic resilience. Serious harm is never softened by this system.
 
-❤️ Deep Relationship Tracking
+7. EARNED REPAIR
+trust_repair, boundary_repair and abandonment_repair must be mechanically supported by prior damage plus later rebuilding behavior across multiple turns.
 
-Every directional relationship can track:
+8. REPETITION DAMPING
+Repeated warmth/support/conflict-style event families have diminishing mechanical impact, preventing tag spam from maxing relationships.
 
-* Trust
-* Affection
-* Respect
-* Loyalty
-* Openness
-* Attachment
-* Attraction
-* Jealousy
-* Resentment
-* Fear
-* Tension
+9. TURNING-POINT MEMORY
+Major events can survive beyond the normal ledger in a durable archive. Memory selection is salience-aware so an old sacrifice or betrayal can remain more important than several newer routine milestones.
 
-Relationships are directional.
+10. ENSEMBLE AWARENESS
+Group dynamics and Cast Balance keep multi-character scenes from collapsing into one uniform reaction or using every context slot on one NPC.
 
-Mara → Alex
+ADAPTIVE SCENARIOS
+------------------
+AUTO Scenario Mode can detect and combine profiles including:
 
-does not have to equal:
+Universal • Romance • Slice of Life • Horror • Fantasy • Sci-Fi • Superhero • Crime • Mystery • Survival • Political • Military • Workplace • School • Family • Adventure • Comedy • Historical • Sports • Medical • Legal • Espionage • Celebrity • Nautical • Western • Post-Apocalyptic • Cyberpunk
 
-Alex → Mara
+The profile changes social vocabulary and twist weighting, not established lore. Crossed Wires should adapt to the story rather than importing a new genre into it.
 
-One character can trust somebody who doesn’t trust them back.
+RELATIONSHIP ROLES
+------------------
+Supported roles include:
 
-Someone can love another person while resenting them.
+stranger • acquaintance • friend • best friend • family • parent • child • sibling • relative • romantic • ex • rival • ally • enemy • mentor • student • superior • subordinate • colleague • teammate • political • professional • caregiver • dependent • clinician • patient • attorney • client • handler • asset • captain • crew
 
-A rival can dislike you while genuinely respecting you.
+Explicit role phrases can be inferred directly from prose. Manual corrections can also be locked.
 
-A friend can remain loyal while being furious.
+Family-role bonds are mechanically blocked from romantic event scoring even if the narrator emits an incorrect tag.
 
-Crossed Wires deliberately keeps those contradictions instead of collapsing everything into a single relationship score.
+RELATIONSHIP TWISTS
+-------------------
+Twists are optional pressure, not predetermined canon.
 
-⸻
+They are filtered by:
+• scenario profile
+• relationship role
+• current relationship state
+• adult gating
+• scene presence
+• pair cooldown
+• exact twist cooldown
+• relationship needs
+• recent drama
+• current scene urgency
+• twist-topic diversity
 
-🧠 More Than Numbers
+Twist-topic diversity stops several different twist IDs from repeatedly attacking the same secrecy, jealousy, power, trust, rivalry, family or resource issue.
 
-The raw values are only part of the system.
+Automatic twists are scene-bound by default. Offscreen Twists can be enabled if you deliberately want major absent relationships to re-enter the story.
 
-Crossed Wires also derives higher-level relationship information such as:
+MATURE THEMES
+-------------
+Optional mature relationship mechanics only apply when all participants are established adults.
 
-Bond Stage
+These can include attraction, consensual adult intimacy, jealousy, temptation, infidelity, commitment, breakups and parenthood-related developments.
 
-A relationship can move through stages like:
+Private narrator guidance keeps intimacy non-explicit/fade-to-black and focuses on expectations, communication and consequences.
 
-* Provisional
-* Developing
-* Established
-* Close
-* Interdependent
-* Fractured
-* Rebuilding
-* Post-Relationship
-
-A relationship that has existed for hundreds of turns therefore doesn’t get treated the same as somebody you met ten minutes ago.
-
-⸻
-
-Relationship Arc
-
-The engine can recognise patterns such as:
-
-* Deepening
-* Drifting
-* Repairing
-* Fractured
-* Active Rivalry
-* Competitive Respect
-* Family Strain
-* Professional Tension
-* Proven Alliance
-* Slow-Burn Chemistry
-* Volatile Chemistry
-* Stable Close Bond
-
-⸻
-
-Current Social Threads
-
-Relationships can carry several unresolved issues at once.
-
-Examples:
-
-* damaged trust
-* secrecy
-* boundaries
-* abandonment
-* responsibility
-* recognition
-* grief
-* jealousy
-* rivalry
-* ideological conflict
-* power imbalance
-* unresolved chemistry
-
-This gives the narrator something much more useful than:
-
-Trust: 47
-
-A relationship might instead be understood as:
-
-Established friendship. Repairing. Strong operational trust but weak personal trust. Resentment remains over an old betrayal. Recent behavior suggests genuine rebuilding.
-
-⸻
-
-🔐 Different Kinds of Trust
-
-Trust isn’t always one thing.
-
-Crossed Wires can derive:
-
-Personal Trust
-
-Can this person be emotionally honest and vulnerable with them?
-
-Operational Trust
-
-Can they be relied upon when something actually needs doing?
-
-Confidentiality Trust
-
-Can they safely be trusted with secrets or sensitive information?
-
-Judgment Trust
-
-Does the character respect their decisions?
-
-That allows much more interesting relationships.
-
-A soldier might trust someone completely in combat but never discuss their personal life with them.
-
-A friend might emotionally trust someone while thinking they’re useless in a crisis.
-
-⸻
-
-🛡️ Bond Resilience
-
-Long-standing healthy relationships become more resilient to minor friction.
-
-A twenty-year friendship shouldn’t mechanically collapse because of one sarcastic comment.
-
-Minor arguments can still create:
-
-* tension
-* irritation
-* resentment
-* temporary distance
-
-But established trust and loyalty give the relationship some resistance.
-
-Serious events are different.
-
-Things like:
-
-* betrayal
-* infidelity
-* abandonment
-* coercion
-* blackmail
-* major deception
-* serious boundary violations
-
-still hit hard.
-
-A strong relationship is resilient, not invincible.
-
-⸻
-
-💥 Emotional Inertia
-
-Crossed Wires also works in the opposite direction.
-
-A massive betrayal shouldn’t disappear because of two friendly conversations.
-
-Serious relationship damage can create temporary emotional inertia.
-
-While that damage is still fresh:
-
-* minor warmth has reduced effect
-* small supportive moments don’t instantly restore trust
-* affection can’t simply erase resentment
-* genuine repair has to be demonstrated
-
-This helps prevent:
-
-betrayal → apology → everything is fine
-
-⸻
-
-🩹 Repair Has To Be Earned
-
-Major relationship damage has dedicated repair mechanics.
-
-Crossed Wires can distinguish between:
-
-* calming down
-* forgiving someone
-* actually trusting them again
-
-Those are not the same thing.
-
-For serious trust, boundary or abandonment damage, repair requires actual evidence across later turns.
-
-For example:
-
-1. The betrayal happens.
-2. The character admits what they did.
-3. They behave honestly afterward.
-4. They keep an important promise.
-5. They prove dependable when it matters.
-6. Trust begins rebuilding.
-
-The narrator can’t simply emit a trust_repair event immediately and erase everything.
-
-The JavaScript checks whether the repair has actually been earned.
-
-⸻
-
-🕰️ Long-Term Memory
-
-Crossed Wires maintains a large relationship-event ledger.
-
-Routine events can eventually roll out to keep performance under control.
-
-Major moments are different.
-
-Important events are preserved in a separate Turning-Point Archive.
-
-Examples include:
-
-* betrayals
-* sacrifices
-* rescues
-* breakups
-* reconciliation
-* marriage
-* commitment
-* major boundary violations
-* abandonment
-* shared trauma
-* parenthood developments
-* secret identity reveals
-
-Archive selection considers:
-
-* severity
-* mechanical impact
-* narrative importance
-* recency
-* event diversity
-* relationship coverage
-
-An ancient life-changing sacrifice isn’t automatically forgotten just because it’s old.
-
-⸻
-
-🔁 Repetition Damping
-
-Repeated small events gradually become less powerful.
-
-For example:
-
-warmth → warmth → warmth → warmth → warmth
-
-won’t endlessly farm Affection.
-
-But:
-
-support → vulnerability → kept promise → sacrifice → reconciliation
-
-continues to matter because genuinely different things are happening.
-
-This makes long relationships much harder to accidentally max out.
-
-⸻
-
-🌍 Adaptive Scenario Detection
-
-Crossed Wires can automatically work out what kind of scenario you’re playing.
-
-Supported profiles include:
-
-* ❤️ Romance
-* 🏠 Slice of Life
-* 👻 Horror
-* ⚔️ Fantasy
-* 🚀 Sci-Fi
-* 🦸 Superhero
-* 🔫 Crime
-* 🔍 Mystery
-* 🌲 Survival
-* 🏛️ Political
-* 🪖 Military
-* 💼 Workplace
-* 🎓 School
-* 👨‍👩‍👧 Family
-* 🗺️ Adventure
-* 😂 Comedy
-* 🏰 Historical
-* 🏆 Sports
-* 🏥 Medical
-* ⚖️ Legal
-* 🕵️ Espionage
-* 🎬 Celebrity
-* ⛵ Nautical
-* 🤠 Western
-* ☢️ Post-Apocalyptic
-* 🌃 Cyberpunk
-
-It can combine profiles too.
-
-Examples:
-
-SUPERHERO + ROMANCE
-
-FANTASY + POLITICAL
-
-HORROR + SURVIVAL
-
-CRIME + MYSTERY
-
-If the scenario doesn’t fit anything confidently, Crossed Wires uses a flexible Universal profile instead of forcing the wrong genre.
-
-⸻
-
-🎭 Scenario-Specific Relationship Events
-
-Different scenarios create different kinds of relationship evidence.
-
-🌲 Survival
-
-* resource sharing
-* resource denial
-* dependency
-* leadership
-* sacrifice
-* reliability under pressure
-
-🪖 Military
-
-* shared duty
-* command backed
-* command refused
-* competence under fire
-* loyalty
-* responsibility
-
-💼 Workplace
-
-* professional support
-* credit shared
-* credit stolen
-* delegated responsibility
-* power abuse
-* professional boundaries
-
-🔍 Mystery
-
-* accusations
-* suspicion
-* withheld information
-* confidentiality
-* evidence support
-* suspicion cleared
-
-🦸 Superhero
-
-* secret identity reveals
-* protection
-* responsibility
-* heroic duty
-* divided loyalties
-
-🏥 Medical
-
-* care under pressure
-* confidentiality
-* ethical disagreement
-* professional trust
-* difficult responsibility
-
-🕵️ Espionage
-
-* cover protected
-* cover compromised
-* handler/asset trust
-* secrets
-* divided loyalty
-
-And many more.
-
-⸻
-
-🤝 Relationship Roles
-
-Crossed Wires can understand different types of bonds.
-
-Examples include:
-
-* friend
-* best friend
-* sibling
-* parent
-* child
-* relative
-* romantic partner
-* ex
-* rival
-* enemy
-* ally
-* teammate
-* mentor
-* student
-* superior
-* subordinate
-* colleague
-* political relationship
-* professional relationship
-* caregiver
-* dependent
-* clinician
-* patient
-* attorney
-* client
-* handler
-* asset
-* captain
-* crew
-
-These roles influence how relationship events are interpreted.
-
-⸻
-
-🚫 Not Every Relationship Becomes Romance
-
-This is deliberately enforced.
-
-A sibling being protective is not flirting.
-
-A commander respecting a soldier is not attraction.
-
-Two rivals constantly arguing doesn’t automatically mean they secretly want each other.
-
-Generic:
-
-* banter
-* admiration
-* rivalry
-* teamwork
-* respect
-
-do not automatically increase Attraction.
-
-Romance requires genuinely romantic evidence.
-
-Family-role relationships also have a JavaScript-level romance block, so even if the narrator outputs an incorrect romantic event, the engine can reject it.
-
-⸻
-
-⚖️ Power Dynamics
-
-Crossed Wires understands that relationships can contain structural power differences.
-
-Examples:
-
-* parent → child
-* superior → subordinate
-* mentor → student
-* caregiver → dependent
-* clinician → patient
-* attorney → client
-* handler → asset
-* captain → crew
-
-It can also recognise story-created leverage such as:
-
-* blackmail
-* authority
-* dependency
-* power abuse
-* power being shared
-
-Power dynamics influence relationship context without taking control away from the player.
-
-⸻
-
-👥 Group Dynamics
-
-Relationships don’t exist in isolation.
-
-Crossed Wires can analyse several active bonds in the same scene and detect patterns such as:
-
-* mixed loyalties
-* group strain
-* strong cohesion
-* conflicting allegiances
-* different attitudes toward the player
-
-The narrator is encouraged to preserve those differences.
-
-Instead of:
-
-Everyone glares at you.
-
-you can get individual reactions based on actual history.
-
-⸻
-
-👥 Cast-Balanced Context
-
-Large casts can easily cause one heavily connected NPC to consume all available relationship context.
-
-Crossed Wires balances active relationship slots across the current cast.
-
-It still prioritises relevance.
-
-It just avoids unnecessarily spending every slot on one character while other important people disappear.
-
-This is especially useful for:
-
-* superhero teams
-* military squads
-* families
-* friend groups
-* workplaces
-* sports teams
-* survival groups
-* ensemble dramas
-
-⸻
-
-🎲 Adaptive Relationship Twists
-
-Crossed Wires can occasionally seed relationship complications.
-
-Twists aren’t simply chosen from one universal random list.
-
-Selection can consider:
-
-* scenario
-* relationship role
-* bond stage
-* current relationship arc
-* unresolved social threads
-* recent events
-* current scene
-* active cast
-* relationship needs
-* previous twist topics
-
-⸻
-
-Examples
-
-Horror
-
-* fear damaging trust
-* survivor guilt
-* paranoia
-* blame
-
-Survival
-
-* scarce resources
-* leadership conflict
-* responsibility
-* mutual dependence
-
-Workplace
-
-* favouritism
-* stolen credit
-* professional boundaries
-* authority shifts
-
-Military
-
-* orders versus loyalty
-* command disputes
-* rank tension
-
-Superhero
-
-* secret identities
-* duty versus personal relationships
-* mission pressure
-
-Family
-
-* expectations
-* old wounds
-* responsibility
-* favouritism
-
-Romance
-
-* jealousy
-* old flames
-* commitment
-* reconciliation
-* temptation
-* breakups
-
-⸻
-
-🎨 Twist Diversity
-
-Crossed Wires doesn’t only prevent the exact same twist repeating.
-
-It also tracks broader topics.
-
-For example:
-
-* Secret Exposed
-* Confidentiality Problem
-* Withheld Information
-* Cover Compromised
-
-are different twists, but they’re all broadly about secrecy.
-
-Recently used topics are temporarily downweighted.
-
-This helps relationship drama stay varied instead of circling one issue endlessly.
-
-⸻
-
-🚨 Scene Awareness
-
-Automatic twists are scene-aware.
-
-If the player is:
-
-* in combat
-* being chased
-* escaping an explosion
-* dealing with an emergency
-* fighting for survival
-
-relationship twists become less likely.
-
-Quiet conversations and downtime can allow more social developments.
-
-This helps prevent ridiculous interruptions like:
-
-The reactor is exploding.
-
-followed by:
-
-Sarah wants to discuss your relationship.
-
-⸻
-
-📌 Pin Important Characters
-
-Keep an important off-screen character available for continuity:
-
-!wirepin Mara
-
-Remove the pin:
-
-!wireunpin Mara
-
-Useful for:
-
-* partners
-* family
-* major rivals
-* mentors
-* recurring villains
-* important allies
-
-Pinning does not bypass relationship safety rules or automatically force off-screen twists.
-
-⸻
-
-🔇 Mute Characters
-
-Keep a character’s history without automatically using them:
-
-!wiremute Mara
-
-Restore them:
-
-!wireunmute Mara
-
-This is useful when somebody temporarily leaves the story.
-
-Their relationship history remains intact.
-
-⸻
-
-🛠️ Manual Corrections
-
-No automatic classifier is perfect.
-
-Crossed Wires includes tools for fixing mistakes without destroying relationship history.
-
-Merge duplicate identities
-
-!wiremerge Mara | Mara Voss
-
-Preserves:
-
-* events
-* aliases
-* sightings
-* turning points
-* roles
-* locks
-* pin/mute state
-
-⸻
-
-Correct a role
-
-NPC → Player:
-
-!wirerole Mara | sibling
-
-NPC → NPC:
-
-!wirerole Mara | Leo | colleague
-
-Manual role corrections are authoritative.
-
-Automatic inference cannot silently overwrite them.
-
-Release the lock:
-
-!wireunlockrole Mara
-
-or:
-
-!wireunlockrole Mara | Leo
-
-⸻
-
-Correct age status
-
-!wireage Mara | adult
-!wireage Mara | minor
-!wireage Mara | unknown
-
-Release the manual age lock:
-
-!wireunlockage Mara
-
-⸻
-
-🔞 Optional Adult Relationship Themes
-
-For characters established as adults, optional settings can support themes such as:
-
-* attraction
-* consensual intimacy
-* jealousy
-* temptation
-* infidelity
-* breakups
-* commitment
-* complicated relationships
-* parenthood-related developments
-
-The relationship engine focuses on:
-
-* expectations
-* trust
-* consequences
-* emotional aftermath
-* boundaries
-* commitment
-
-rather than explicit sexual writing.
-
-Adult-only mechanics remain gated behind established adulthood.
-
-⸻
-
-⚙️ Config Story Card
-
-Crossed Wires automatically creates:
+CONFIG STORY CARD
+-----------------
+The script automatically creates:
 
 Crossed Wires Config
 
-You do not need to edit Library.js every time you want to change something.
+The Entry is deliberately short and contains only editable values. The default Entry is 1,164 characters.
 
-The Story Card Entry contains the actual settings.
+Every one of the 51 settings is explained individually in the Story Card Notes.
 
-The Story Card Notes explain what every option does.
+Important newer controls:
 
-⸻
-
-Example Config
-
-[Core]
-Enabled: ON
-Relationship Pace: SLOW
-NPC Initiative: ON
-Observation Turns: 3
-Observation Appearances: 2
-Event Sensitivity: BALANCED
 Bond Resilience: ON
+Cast Balance: ON
+Twist Diversity: ON
 Emotional Inertia: ON
 Trust Domains: ON
 Bond Stages: ON
 Social Threads: ON
 Power Dynamics: ON
-Cast Balance: ON
-[Adaptation]
-Scenario Mode: AUTO
-Adaptation Strength: FULL
-Profile Stability: 4
-Role Awareness: ON
-Role Inference: ON
-Scenario Twists: ON
-Offscreen Twists: OFF
-[Drama & Twists]
-Twist Mode: WILD
-Twist Chance: AUTO
-Twist Need Bias: ON
-Twist Diversity: ON
-[Relationship Scope]
-NPC To NPC: ON
-Romance: ON
-Mature Themes: ON
-Adult Intimacy: ON
-Infidelity: ON
-Breakups: ON
-Parenthood: ON
-Toxic Drama: ON
-[Advanced]
 Adaptive Protocol: ON
-Archive Anchors: 600
-[Display]
-Dashboard Numbers: ON
 
-The exact generated card contains additional settings.
+COMMANDS
+--------
+Crossed Wires now uses slash commands. Type the command as the whole input.
+The parser also recognizes AI Dungeon Do/Say wrappers such as > You /wire Mara.
 
-⸻
+MAIN
+/wire NAME
+Inspect relationships involving one character. Names with spaces work; quotes are supported.
 
-📟 Commands
+/wires
+Inspect all tracked relationships.
 
-Relationships
+/wire status
+Show engine, config and runtime health.
 
-!wire NAME
+/wire profile
+Show current adaptive scenario detection.
 
-Inspect relationships involving one character.
+/wire twists
+Show recent twist seeds, topic, risk and whether they were used.
 
-!wires
+/wire cast
+Show pinned/muted NPCs and manual locks.
 
-View tracked relationships.
+/wire test
+Run a non-destructive self-check of the slash parser, registries, config and persistent state.
 
-⸻
+CAST MANAGEMENT
+/wire pin NAME
+/wire unpin NAME
+Keep/remove an important NPC from off-screen continuity eligibility.
 
-Scenario
+/wire mute NAME
+/wire unmute NAME
+Keep all history while suppressing/restoring automatic context and twist use.
 
-!wireprofile
+/wire forget NAME
+Permanently remove an NPC and relationship history involving them.
 
-See what kind of scenario Crossed Wires currently thinks you’re playing.
+/wire merge ALIAS | CANONICAL
+Merge duplicate identities while preserving history, aliases, roles and cast controls.
 
-⸻
+MANUAL CORRECTIONS
+/wire role NAME | ROLE
+Lock NAME → YOU relationship role.
 
-Twists
+/wire role FROM | TO | ROLE
+Lock an NPC → NPC relationship role.
 
-!wiretwists
+/wire unlockrole NAME
+/wire unlockrole FROM | TO
+Release the corresponding manual role lock.
 
-View recent relationship twists.
+/wire age NAME | adult
+/wire age NAME | minor
+/wire age NAME | unknown
+Set and lock age status used by adult-only gating.
 
-!spark
+/wire unlockage NAME
+Release the manual age lock without deleting current history/status.
 
-Force an eligible twist.
+TWISTS
+/spark
+/spark small
+/spark medium
+/spark major
+Arm an eligible relationship twist for the next normal turn.
 
-You can also choose intensity:
+HELP
+/wire help
+Show the full command guide in the adventure.
 
-!spark small
-!spark medium
-!spark major
+SHORT ALIASES
+/wirestatus, /wireprofile, /wirecast, /wiretwists and /wirehelp are also accepted.
+/cw can be used as a short root for /wire subcommands.
 
-⸻
+MALFORMED COMMANDS
+Recognized slash commands with bad syntax are intercepted and return a usage message instead of being sent to the narrator. This prevents command mistakes becoming story prose.
 
-Engine Status
+COMMAND OUTPUT NOTE
+AI Dungeon currently errors if an Input script returns an empty string or stop. Crossed Wires therefore uses a zero-width input and replaces the generated Output with the command response. Command/dashboard responses are flagged in state as interface-only so later relationship context tells the narrator not to treat them as story canon.
 
-!wirestatus
+CONTEXT BEHAVIOR
+----------------
+Context.js is append-only and contains // @cache-compatible.
 
-Shows engine status and checks the config.
+Crossed Wires respects info.maxChars when it is available and shrinks its own private block rather than deleting, moving or replacing existing model context.
 
-!wirecast
+The hidden protocol has full, compact and micro forms. Low context therefore reduces relationship detail before it sacrifices the original story context.
 
-Shows pinned/muted NPCs and manual locks.
+The event vocabulary is dynamic: the narrator only receives a subset that makes sense for the scenario and currently active relationships.
 
-!wirehelp
+LONG-ADVENTURE PERFORMANCE
+--------------------------
+The primary event ledger is capped. Major turning points roll into a separately capped archive.
 
-Command help.
+Event indexes, pair lists, relevant-link selection, profile/config lookup and link reconstruction are cached per hook where useful.
 
-⸻
+A synthetic local test with 2,500 events, 500 NPCs and 100 repeated Context builds after warm-up measured roughly:
 
-Character Management
-
-!wireforget NAME
-
-Completely erase one NPC and their tracked relationship history.
-
-!wiremerge NAME | CANONICAL NAME
-
-Merge duplicate identities.
-
-!wirepin NAME
-!wireunpin NAME
-
-Manage persistent continuity.
-
-!wiremute NAME
-!wireunmute NAME
-
-Temporarily suppress automatic relationship influence.
-
-⸻
-
-📦 Installation
-
-Crossed Wires uses all four AI Dungeon script tabs.
-
-The package contains:
-
-Library.js
-Input.js
-Context.js
-Output.js
-
-1. Open your Scenario
-
-Open the AI Dungeon scenario you want Crossed Wires to run in.
-
-2. Open Scripts
-
-Enable/open the scenario scripting editor.
-
-3. Copy each file into its matching tab
-
-* Library.js → Library
-* Input.js → Input
-* Context.js → Context
-* Output.js → Output
-
-4. Start or continue the adventure
-
-Crossed Wires will create its Config Story Card automatically.
-
-5. Edit the Config Story Card if needed
-
-You can leave everything at its defaults and simply play.
-
-⸻
-
-🔄 Updating Crossed Wires
-
-When replacing an older Crossed Wires build:
-
-1. Replace all four script tabs.
-2. Do not deliberately delete the existing relationship state.
-3. Continue the adventure.
-
-The engine includes migration handling for previous Crossed Wires state/config structures.
-
-Existing relationship history, aliases, archived events and recognised configuration choices are designed to migrate forward rather than intentionally reset.
-
-⸻
-
-👤 Player Agency
-
-Crossed Wires does not track:
-
-YOU → NPC
-
-It tracks:
-
-NPC → YOU
-
-and:
-
-NPC → NPC
-
-The narrator is explicitly instructed not to decide:
-
-* your thoughts
-* your emotions
-* your dialogue
-* your consent
-* your commitments
-* your actions
-
-The script models what the NPCs feel.
-
-What you feel remains yours.
-
-⸻
-
-🕵️ Hidden Tracking
-
-Crossed Wires uses temporary machine tags in generated output to classify relationship evidence.
-
-Those tags are removed by the Output script before the player sees the final story.
-
-Normal play therefore stays normal prose.
-
-The engine doesn’t need to display:
-
-Trust +4
-Affection +2
-
-inside every story response.
-
-Use the dashboard commands when you actually want to inspect the mechanics.
-
-⸻
-
-⚡ Context Efficiency
-
-Crossed Wires is designed for long adventures.
-
-It includes:
-
-* scene relevance filtering
-* active-bond limits
-* cast balancing
-* indexed event lookup
-* per-hook caches
-* archive limits
-* dynamic event vocabularies
-* adaptive protocol sizes
-* context headroom checking
-* append-only Context behavior
-
-The Context script uses:
-
-// @cache-compatible
-
-for AI Dungeon’s cache-compatible V1 Context behavior.
-
-If there isn’t enough available context, Crossed Wires progressively reduces its private guidance rather than overwriting the existing story context.
-
-⸻
-
-🔁 Retry & Undo Handling
-
-Crossed Wires includes protection for:
-
-* Retry
-* regenerated outputs
-* deleted future turns
-* failed/empty generations
-* role changes
-* relationship events
-* twist state
-
-A replaced response shouldn’t remain in relationship history after the story has moved to a different version of that turn.
-
-⸻
-
-🧪 Tested For
-
-The engine has been repeatedly regression-tested around:
-
-* long adventures
-* large casts
-* NPC-to-NPC relationships
-* scenario changes
-* mixed genres
-* retries
-* undo
-* duplicate identities
-* Character Card aliases
-* family-role romance prevention
-* adult/minor gating
-* malformed machine tags
-* config migration
-* context limits
-* long relationship ledgers
-* archive compaction
-* manual corrections
-* ensemble scenes
-* relationship repair
-
-⸻
-
-💡 Recommended Uses
-
-Crossed Wires works particularly well for:
-
-❤️ Romance & relationship drama
-🦸 Superhero universes
-🧟 Zombie/apocalypse scenarios
-⚔️ Fantasy campaigns
-👻 Horror
-🔍 Murder mysteries
-🔫 Crime dramas
-🪖 Military stories
-💼 Workplace scenarios
-🎓 School/campus stories
-👨‍👩‍👧 Family dramas
-🏛️ Political intrigue
-🚀 Science fiction
-🌃 Cyberpunk
-🏆 Sports stories
-🎭 Ensemble casts
-
-But none of those are required.
-
-If the scenario is about characters who interact with each other, Crossed Wires has something to work with.
-
-⸻
-
-❓ FAQ
-
-Does this force romance?
-
-No.
-
-Crossed Wires actively tries to prevent every meaningful relationship from becoming romantic.
-
-Romance requires actual romantic evidence.
-
-⸻
-
-Does it decide how my character feels?
-
-No.
-
-The player’s emotional state is deliberately outside the relationship ledger.
-
-⸻
-
-Will it create drama every turn?
-
-No.
-
-The twist system uses cooldowns, scene pressure, scenario adaptation and topic diversity.
-
-Calm scenes are allowed to stay calm.
-
-⸻
-
-Can NPCs have relationships with each other?
-
-Yes.
-
-NPC-to-NPC relationship tracking can be enabled or disabled in the Config Story Card.
-
-⸻
-
-Can I use it without twists?
-
-Yes.
-
-Turn the twist system OFF and keep the persistent relationship engine.
-
-⸻
-
-Can I disable romance completely?
-
-Yes.
-
-The wider friendship, family, professional, rivalry, alliance and team systems still work.
-
-⸻
-
-What happens if it detects somebody incorrectly?
-
-Use the correction commands.
-
-You can:
-
-* merge identities
-* correct roles
-* correct ages
-* mute characters
-* remove characters entirely
-
-⸻
-
-Will it work with existing scenarios?
-
-Usually, yes.
-
-Crossed Wires was deliberately designed to adapt to the story around it rather than requiring a scenario written specifically for the script.
-
-⸻
-
-🛠️ Project Files
-
-Crossed Wires/
-├── Library.js
-├── Input.js
-├── Context.js
-├── Output.js
-├── ALL_TABS.txt
-├── QUICK_START.txt
-├── README.md
-├── CHANGELOG.txt
-└── TEST_REPORT.txt
-
-⸻
-
-⚠️ Notes
-
-Crossed Wires depends heavily on the AI correctly understanding ordinary story events.
-
-The JavaScript adds validation and safeguards, but no language-model classifier will be perfect in every possible story.
-
-That’s why manual correction commands exist.
-
-If something strange happens, check:
-
-!wire NAME
-!wirestatus
-!wireprofile
-
-before assuming the relationship history is wrong.
-
-⸻
-
-💬 Feedback
-
-If you use Crossed Wires, feedback is genuinely useful.
-
-Especially:
-
-* false relationship detections
-* scenario types AUTO struggles with
-* strange twist choices
-* relationships that change too quickly/slowly
-* large-cast behavior
-* long-adventure performance
-* event types that feel missing
-
-The best improvements usually come from seeing where the script behaves strangely in an actual adventure rather than just adding another hundred lines of theoretical features.
-
-⸻
-
-⚡ Crossed Wires
-
-NPCs shouldn’t just remember facts.
-
-They should remember:
-
-who helped them,
-who failed them,
-who embarrassed them,
-who earned their respect,
-who they trusted when everything went wrong,
-who stood beside them,
-and who they still haven’t completely forgiven.
-
-Crossed Wires makes that history harder to forget.
+Average ~19.23 ms
+Median ~18.77 ms
+95th percentile ~21.70 ms
+Maximum observed ~23.21 ms
+
+These figures are development benchmarks only and do not guarantee AI Dungeon server timings.
+
+INSTALLATION
+------------
+1. Library.js → Library tab
+2. Input.js → Input tab
+3. Context.js → Context tab
+4. Output.js → Output tab
+5. Save and enable scripting
+6. Start/continue the adventure
+7. Crossed Wires Config should be created automatically
+
+UPGRADING
+---------
+Replace all four tabs.
+
+Existing Crossed Wires relationship state is migrated in place rather than deliberately erased. Recognized Config choices are read from the previous card and rewritten into the current clean layout with new settings receiving current defaults.
+
+FILES
+-----
+Library.js      complete engine
+Input.js        Input hook
+Context.js      append-only Context hook
+Output.js       Output/tag processing hook
+ALL_TABS.txt    all four tabs in one file
+QUICK_START.txt fast setup guide
+CHANGELOG_v11.txt changes in this build
+TEST_REPORT.txt automated/stress-test summary
