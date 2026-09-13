@@ -1,7 +1,7 @@
 // ============================================================================
 // CROSSED WIRES — Adaptive Relationship Engine for AI Dungeon
-// Slash-command reliability pass — robust input-mode parsing, command self-check,
-// interface-only dashboard handling, stale-command protection and existing relationship intelligence
+// Relationship-continuity build — existing-bond reconstruction, live Character
+// Story Card Notes, visible Pulse feedback, slash commands and adaptive social logic
 // Put this ENTIRE file in the Library tab.
 //
 // Design goal: relationships create plot without turning every turn into drama.
@@ -9,7 +9,7 @@
 // state, scoring, pacing, scars, milestones, trajectory and twist selection.
 // ============================================================================
 
-const CW_ENGINE_VERSION = 12;
+const CW_ENGINE_VERSION = 13;
 
 let CW_RUNTIME_EVENT_INDEX = null;
 let CW_RUNTIME_CONFIG_CACHE = null;
@@ -54,6 +54,9 @@ const CW_DEFAULT_CONFIG = {
   backfillHistoryActions: 40,          // recent history actions inspected for pre-existing relationships
   baselineFromCards: true,             // scan character/story cards for explicit relationship facts
   behaviorGuidance: true,              // turn relationship state into concrete NPC behavior guidance
+  characterCardNotes: true,             // append a managed live relationship panel to Character Card Notes
+  characterCardNotesDetail: "STANDARD",// COMPACT | STANDARD | DETAILED
+  characterCardNotesMaxBonds: 8,         // maximum relationships shown per character card
   adaptiveProtocol: true,           // shrink/expand hidden protocol to available context
   maxArchiveAnchors: 600,           // global durable turning-point archive cap
   scenarioMode: "AUTO",           // AUTO or an explicit scenario profile
@@ -666,6 +669,9 @@ function CW_init() {
   cw.pinnedNpcs = cw.pinnedNpcs && typeof cw.pinnedNpcs === "object" ? cw.pinnedNpcs : {};
   cw.baselines = cw.baselines && typeof cw.baselines === "object" ? cw.baselines : {};
   cw.backfill = cw.backfill && typeof cw.backfill === "object" ? cw.backfill : { historySig:"", cardsSig:"", contextSig:"", scans:0, lastTurn:-1 };
+  cw.cardNotesSync = cw.cardNotesSync && typeof cw.cardNotesSync === "object" ? cw.cardNotesSync : { digests:{}, lastTurn:-1, updates:0 };
+  cw.cardNotesSync.digests = cw.cardNotesSync.digests && typeof cw.cardNotesSync.digests === "object" ? cw.cardNotesSync.digests : {};
+  cw.cardNotesSync.lastStateSig = String(cw.cardNotesSync.lastStateSig || "");
   cw.command = cw.command || null;
   if (!Number.isFinite(Number(cw.lastCommandTurn))) cw.lastCommandTurn = -9999;
   cw.lastCommandType = cw.lastCommandType || "";
@@ -809,7 +815,10 @@ function CW_recentHistoryText(limit) {
 }
 
 const CW_CONFIG_TITLE = "Crossed Wires Config";
-const CW_CONFIG_MARKER = "CWCFG12P";
+const CW_CONFIG_MARKER = "CWCFG13P";
+const CW_CHARACTER_NOTES_START = "----- ⚡ CROSSED WIRES — CHARACTER STATUS -----";
+const CW_CHARACTER_NOTES_END = "----- END CROSSED WIRES STATUS -----";
+
 
 function CW_cardKeysText(card) {
   if (!card) return "";
@@ -866,6 +875,9 @@ function CW_defaultConfigEntryFrom(cfg) {
     "Backfill History: " + c.backfillHistoryActions,
     "Card Relationship Scan: " + (c.baselineFromCards ? "ON" : "OFF"),
     "Behavior Guidance: " + (c.behaviorGuidance ? "ON" : "OFF"),
+    "Character Card Notes: " + (c.characterCardNotes ? "ON" : "OFF"),
+    "Card Notes Detail: " + c.characterCardNotesDetail,
+    "Card Notes Bonds: " + c.characterCardNotesMaxBonds,
     "",
     "[Adaptation]",
     "Scenario Mode: " + c.scenarioMode,
@@ -951,6 +963,9 @@ function CW_configNotes() {
     "• Backfill History — 5–120 recent history actions to inspect for explicit pre-existing relationship evidence when AI Dungeon exposes them to the script. The platform only provides recent history, so Crossed Wires progressively learns older relationships as evidence becomes available.",
     "• Card Relationship Scan — ON scans Character/NPC Story Cards and relationship-style card text for explicit family, friendship, romance, rivalry, professional and other established bonds, even when those cards are not currently triggered for the narrator.",
     "• Behavior Guidance — ON translates relationship state into concrete, non-forced behavior tendencies such as willingness to confide, cooperate, challenge, protect, avoid, seek reassurance or keep distance. This is guidance, never guaranteed behavior or player control.",
+    "• Character Card Notes — ON adds a managed Crossed Wires status panel to Character/NPC Story Card Notes. Your existing Notes are preserved; only the clearly marked Crossed Wires block is replaced when relationship state changes.",
+    "• Card Notes Detail — COMPACT, STANDARD, DETAILED. COMPACT shows role/stage only; STANDARD adds arc, trust read, threads and recovered-source information; DETAILED adds recent memories, turning points, behavior guidance and optional exact numbers when Dashboard Numbers is ON.",
+    "• Card Notes Bonds — 1–20. Maximum directional relationships shown in each character card's managed Notes panel. Highest-relevance/current bonds are shown first.",
     "",
     "ADAPTATION",
     "• Scenario Mode — AUTO lets Crossed Wires infer the current scenario from plot context, recent story, Story Cards and placeholders. Manual options: UNIVERSAL, ROMANCE, SLICE_OF_LIFE, HORROR, FANTASY, SCI_FI, SUPERHERO, CRIME, MYSTERY, SURVIVAL, POLITICAL, MILITARY, WORKPLACE, SCHOOL, FAMILY, ADVENTURE, COMEDY, HISTORICAL, SPORTS, MEDICAL, LEGAL, ESPIONAGE, CELEBRITY, NAUTICAL, WESTERN, POST_APOCALYPTIC, CYBERPUNK.",
@@ -1004,7 +1019,7 @@ function CW_configNotes() {
     "When the main event ledger eventually fills, major turning points such as commitments, rescues, betrayals, breakups, sacrifices and repair milestones are moved into a compact archive instead of being forgotten with routine old interactions.",
     "",
     "COMMANDS",
-    "/wire NAME • /wires • /wire status • /wire profile • /wire twists • /wire cast • /wire test • /wire pulse [on/off/subtle/standard/detailed/test] • /wire rescan • /wire forget NAME • /wire merge ALIAS | CANONICAL • /wire role NAME | ROLE • /wire unlockrole NAME [| TO] • /wire age NAME | adult/minor/unknown • /wire unlockage NAME • /wire mute NAME • /wire unmute NAME • /wire pin NAME • /wire unpin NAME • /spark [small|medium|major] • /wire help",
+    "/wire NAME • /wires • /wire status • /wire profile • /wire twists • /wire cast • /wire test • /wire pulse [on/off/subtle/standard/detailed/test] • /wire rescan • /wire cards • /wire forget NAME • /wire merge ALIAS | CANONICAL • /wire role NAME | ROLE • /wire unlockrole NAME [| TO] • /wire age NAME | adult/minor/unknown • /wire unlockage NAME • /wire mute NAME • /wire unmute NAME • /wire pin NAME • /wire unpin NAME • /spark [small|medium|major] • /wire help",
     "Manual /wire role and /wire age corrections become authoritative locks: later model tags or inference cannot silently overwrite them. /wire unlockrole and /wire unlockage release those locks without deleting history. /wire mute preserves history but removes an NPC from automatic relationship context/twists. /wire pin keeps an important NPC context-eligible off-screen without bypassing normal safety or twist rules.",
     "",
     "Internal format marker: " + CW_CONFIG_MARKER
@@ -1063,6 +1078,10 @@ function CW_configFromEntry(entry) {
   cfg.backfillHistoryActions = CW_readNumber(map["BACKFILL HISTORY"], cfg.backfillHistoryActions, 5, 120);
   cfg.baselineFromCards = CW_parseBool(map["CARD RELATIONSHIP SCAN"], cfg.baselineFromCards);
   cfg.behaviorGuidance = CW_parseBool(map["BEHAVIOR GUIDANCE"], cfg.behaviorGuidance);
+  cfg.characterCardNotes = CW_parseBool(map["CHARACTER CARD NOTES"], cfg.characterCardNotes);
+  cfg.characterCardNotesDetail = String(map["CARD NOTES DETAIL"] || cfg.characterCardNotesDetail).trim().toUpperCase();
+  if (!["COMPACT", "STANDARD", "DETAILED"].includes(cfg.characterCardNotesDetail)) cfg.characterCardNotesDetail = "STANDARD";
+  cfg.characterCardNotesMaxBonds = CW_readNumber(map["CARD NOTES BONDS"], cfg.characterCardNotesMaxBonds, 1, 20);
   cfg.scenarioMode = String(map["SCENARIO MODE"] || cfg.scenarioMode).trim().toUpperCase().replace(/[ -]+/g, "_");
   if (!CW_SCENARIO_MODES.includes(cfg.scenarioMode)) cfg.scenarioMode = "AUTO";
   cfg.adaptationStrength = String(map["ADAPTATION STRENGTH"] || cfg.adaptationStrength).trim().toUpperCase();
@@ -1146,14 +1165,14 @@ function CW_upgradeConfigCard(card) {
   if (!card) return;
   const notes = String(card.description || card.notes || "");
   const cleanIdentity = String(card.title || card.name || "") === CW_CONFIG_TITLE && !CW_cardKeysText(card).includes("__crossed_wires_config__");
-  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 12) return;
+  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 13) return;
   if (cleanIdentity && notes.includes(CW_CONFIG_MARKER)) {
-    if (state.crossedWires) state.crossedWires.configCardVersion = 12;
+    if (state.crossedWires) state.crossedWires.configCardVersion = 13;
     return;
   }
   const migrated = CW_configFromEntry(card.entry);
   CW_writeConfigCard(card, migrated);
-  if (state.crossedWires) state.crossedWires.configCardVersion = 12;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 13;
 }
 
 function CW_ensureConfigCard() {
@@ -1171,11 +1190,11 @@ function CW_ensureConfigCard() {
   try {
     // Newer AI Dungeon builds accept name/title and notes after the documented
     // keys/entry/type arguments. Older builds simply use the first three.
-    const result = addStoryCard("__cw_config_bootstrap_12__", entry, "Custom", CW_CONFIG_TITLE, notes);
+    const result = addStoryCard("__cw_config_bootstrap_13__", entry, "Custom", CW_CONFIG_TITLE, notes);
     if (Number.isFinite(Number(result))) createdIndex = Number(result);
   } catch (e) {
     try {
-      const result = addStoryCard("__cw_config_bootstrap_12__", entry, "Custom");
+      const result = addStoryCard("__cw_config_bootstrap_13__", entry, "Custom");
       if (Number.isFinite(Number(result))) createdIndex = Number(result);
     } catch (fallbackError) {
       if (typeof log === "function") log("Crossed Wires: could not create config card: " + fallbackError);
@@ -1206,7 +1225,7 @@ function CW_ensureConfigCard() {
   card.name = CW_CONFIG_TITLE;
   card.description = notes;
   card.notes = notes;
-  if (state.crossedWires) state.crossedWires.configCardVersion = 12;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 13;
   CW_RUNTIME_CONFIG_CARD = card;
   CW_RUNTIME_CONFIG_CACHE = null;
   CW_RUNTIME_CONFIG_ENTRY = null;
@@ -2159,7 +2178,7 @@ function CW_runRelationshipBackfill(turn, baseContext) {
   let changed = 0;
 
   if (cfg.baselineFromCards && typeof storyCards !== "undefined" && Array.isArray(storyCards)) {
-    const cardSigText = storyCards.map(function(c){ return c ? [c.id||"",c.title||c.name||"",CW_cardKeysText(c),String(c.entry||"").slice(0,1600),String(c.description||c.notes||"").slice(0,1200)].join("|") : ""; }).join("\n");
+    const cardSigText = storyCards.map(function(c){ return c ? [c.id||"",c.title||c.name||"",CW_cardKeysText(c),String(c.entry||"").slice(0,1600),CW_stripManagedCharacterNotes(String(c.description||c.notes||"")).slice(0,1200)].join("|") : ""; }).join("\n");
     const sig = CW_fastSig(cardSigText);
     if (sig !== cw.backfill.cardsSig) {
       const names = CW_knownNamesForBackfill();
@@ -2167,7 +2186,7 @@ function CW_runRelationshipBackfill(turn, baseContext) {
         if (!card || CW_configCard() === card) continue;
         const type = String(card.type || "").toLowerCase();
         const title = CW_cleanName(card.title || card.name || "");
-        const entry = String(card.entry || "") + "\n" + String(card.description || card.notes || "");
+        const entry = String(card.entry || "") + "\n" + CW_stripManagedCharacterNotes(String(card.description || card.notes || ""));
         if ((type === "character" || type === "npc") && title) {
           CW_registerNpc(title, turn, CW_detectAdultFromEntry(entry), false);
           const cardAliases = CW_cardKeysText(card).split(/[,;]/).map(function(x){return CW_cleanName(x);}).filter(Boolean).slice(0,8);
@@ -2302,7 +2321,17 @@ function CW_initiativeGuidance(link) {
 }
 
 function CW_roleDisplay(role) {
-  return String(role || "unknown").replace(/_/g, " ");
+  const r = String(role || "unknown").toLowerCase();
+  const labels = {
+    aunt_uncle:"aunt/uncle", niece_nephew:"niece/nephew", parent_in_law:"parent-in-law",
+    sibling_in_law:"sibling-in-law", child_in_law:"child-in-law", in_law:"in-law",
+    co_parent:"co-parent", co_conspirator:"co-conspirator", business_partner:"business partner",
+    service_provider:"service provider", companion_animal:"companion animal", childhood_friend:"childhood friend",
+    best_friend:"best friend", former_friend:"former friend", former_partner:"former partner",
+    casual_partner:"casual partner", adoptive_parent:"adoptive parent", adoptive_child:"adoptive child",
+    foster_parent:"foster parent", foster_child:"foster child"
+  };
+  return labels[r] || r.replace(/_/g, " ");
 }
 
 function CW_isFamilyRole(role) {
@@ -2395,9 +2424,241 @@ function CW_seedFromCharacterCards(turn) {
     const canonical = candidates[0];
     const mentioned = candidates.some(function (candidate) { return CW_wordPresent(recent, candidate); });
     if (!mentioned) continue;
-    CW_registerNpc(canonical, turn, CW_detectAdultFromEntry(String(card.entry || "") + "\n" + String(card.description || card.notes || "")));
+    CW_registerNpc(canonical, turn, CW_detectAdultFromEntry(String(card.entry || "") + "\n" + CW_stripManagedCharacterNotes(String(card.description || card.notes || ""))));
     for (const alias of candidates.slice(1, 8)) CW_registerAlias(alias, canonical);
   }
+}
+
+
+function CW_stripManagedCharacterNotes(value) {
+  // Remove only Crossed Wires-managed blocks. User-authored Notes are left
+  // otherwise untouched so the script never "cleans up" or rewrites their text.
+  let text = String(value || "");
+  let guard = 0;
+  while (guard++ < 20) {
+    const start = text.indexOf(CW_CHARACTER_NOTES_START);
+    if (start < 0) break;
+    const end = text.indexOf(CW_CHARACTER_NOTES_END, start + CW_CHARACTER_NOTES_START.length);
+    if (end < 0) { text = text.slice(0, start); break; }
+    text = text.slice(0, start) + text.slice(end + CW_CHARACTER_NOTES_END.length);
+  }
+  return text;
+}
+
+function CW_extractManagedCharacterNotes(value) {
+  const text = String(value || "");
+  const start = text.indexOf(CW_CHARACTER_NOTES_START);
+  if (start < 0) return "";
+  const end = text.indexOf(CW_CHARACTER_NOTES_END, start + CW_CHARACTER_NOTES_START.length);
+  if (end < 0) return text.slice(start).trim();
+  return text.slice(start, end + CW_CHARACTER_NOTES_END.length).trim();
+}
+
+function CW_isCharacterStoryCard(card) {
+  if (!card || CW_configCard() === card) return false;
+  const type = String(card.type || "").trim().toLowerCase();
+  if (["character", "npc", "person"].includes(type)) return true;
+  const title = CW_cleanName(card.title || card.name || "");
+  if (!title) return false;
+  const key = CW_resolveNpcKey(CW_key(title)) || CW_key(title);
+  if (!state.crossedWires.npcs[key]) return false;
+  const entry = String(card.entry || "");
+  const cleanNotes = CW_stripManagedCharacterNotes(String(card.description || card.notes || ""));
+  const corpus = (entry + "\n" + cleanNotes).toLowerCase();
+  // Conservative fallback for custom-typed character cards that already match a
+  // tracked NPC. Require person/relationship language so locations/items are not
+  // annotated merely because they share a name.
+  return /\b(age|years old|born|he\b|she\b|they\b|his\b|her\b|their\b|relationship|family|friend|sister|brother|mother|father|daughter|son|partner|spouse|husband|wife|rival|enemy|ally|mentor|student|boss|colleague|teammate|roommate|doctor|patient|lawyer|client|handler|captain|crew)\b/i.test(corpus);
+}
+
+function CW_characterCardCanonical(card) {
+  if (!card) return "";
+  const title = CW_cleanName(card.title || card.name || "");
+  if (title) {
+    if (CW_isPlayerName(title)) return "YOU";
+    const resolved = CW_resolveNpcName(title);
+    if (resolved && !CW_isPlayerName(resolved)) return resolved;
+    if (!CW_isPlayerName(title)) return title;
+  }
+  const keys = CW_cardKeysText(card).split(/[,;]/).map(function(x){ return CW_cleanName(x); }).filter(Boolean);
+  for (const candidate of keys) {
+    if (CW_isPlayerName(candidate)) return "YOU";
+    const resolved = CW_resolveNpcName(candidate) || candidate;
+    if (resolved && !CW_isPlayerName(resolved)) return resolved;
+  }
+  return "";
+}
+
+function CW_characterCardLinkRank(link, canonical) {
+  if (!link) return -9999;
+  let score = Number(link.lastChanged || 0) * 0.6 + Number(link.familiarity || 0) * 1.2 + Math.min(80, Number(link.eventCount || 0) * 5);
+  if (CW_key(link.from) === CW_key(canonical)) score += 120;
+  if (link.to === "YOU") score += 25;
+  if (link.baseline) score += 18;
+  if (link.shockActive) score += 25;
+  if (link.flags && ((link.flags.betrayalScars||0)+(link.flags.abandonmentScars||0)+(link.flags.boundaryScars||0) > 0)) score += 30;
+  return score;
+}
+
+function CW_characterCardNotesBlock(card, canonical, turn, cfg) {
+  const isPlayerCard = canonical === "YOU" || CW_isPlayerName(canonical);
+  const npcKey = isPlayerCard ? "you" : (CW_resolveNpcKey(CW_key(canonical)) || CW_key(canonical));
+  const npc = isPlayerCard ? {} : (state.crossedWires.npcs[npcKey] || {});
+  const detail = String(cfg.characterCardNotesDetail || "STANDARD").toUpperCase();
+  const allLinks = arguments.length >= 5 && Array.isArray(arguments[4]) ? arguments[4].slice() : [];
+  if (!allLinks.length) {
+    for (const pair of CW_pairKeys()) {
+      const link = CW_computeLink(pair.from, pair.to, turn);
+      if (!link) continue;
+      if (CW_key(link.from) !== npcKey && CW_key(link.to) !== npcKey) continue;
+      allLinks.push(link);
+    }
+  }
+  const outgoing = allLinks.filter(function(link){ return CW_key(link.from) === npcKey; });
+  const outgoingOthers = {};
+  for (const link of outgoing) outgoingOthers[CW_key(link.to)] = true;
+  const incomingOnly = allLinks.filter(function(link){ return CW_key(link.to) === npcKey && !outgoingOthers[CW_key(link.from)]; });
+  const links = outgoing.concat(incomingOnly);
+  links.sort(function(a,b){
+    const ao = CW_key(a.from) === npcKey ? 1 : 0, bo = CW_key(b.from) === npcKey ? 1 : 0;
+    if (ao !== bo) return bo - ao;
+    return CW_characterCardLinkRank(b, canonical) - CW_characterCardLinkRank(a, canonical);
+  });
+  const limited = links.slice(0, Math.max(1, Number(cfg.characterCardNotesMaxBonds) || 8));
+  const lines = [CW_CHARACTER_NOTES_START];
+  lines.push("Tracking: ACTIVE • relationship scan " + (cfg.baselineFromCards ? "ON" : "OFF") + " • history backfill " + (cfg.relationshipBackfill ? "ON" : "OFF"));
+  if (isPlayerCard) lines.push("Character: YOU (player) • Crossed Wires tracks NPC → YOU only; your own feelings/consent are never assigned.");
+  else lines.push("Character: " + canonical + " • age status: " + String(npc.adultStatus || "unknown") + (state.crossedWires.pinnedNpcs[npcKey] ? " • PINNED" : "") + (state.crossedWires.mutedNpcs[npcKey] ? " • MUTED" : ""));
+  const recoveredCount = allLinks.filter(function(link){ return !!link.baseline; }).length;
+  const eventCount = allLinks.reduce(function(total, link){ return total + Number(link.eventCount || 0); }, 0);
+  lines.push("Known bonds: " + allLinks.length + " • recovered baselines: " + recoveredCount + " • recorded relationship events: " + eventCount);
+  lines.push("");
+  lines.push("RELATIONSHIPS");
+  if (!limited.length) {
+    lines.push("• No established relationship evidence stored yet. Crossed Wires is watching this character and will update this panel when a bond is recovered or changes.");
+  }
+  for (const link of limited) {
+    const role = CW_getRole(link.from, link.to);
+    const roleText = role !== "unknown" ? " [" + CW_roleDisplay(role) + "]" : "";
+    const direction = link.from + " → " + link.to;
+    if (detail === "COMPACT") {
+      lines.push("• " + direction + roleText + " — " + (link.stage || (link.mature ? "established" : "forming")) + (link.arc ? " • " + link.arc : ""));
+      continue;
+    }
+    lines.push("• " + direction + roleText);
+    lines.push("  Stage: " + (link.stage || (link.mature ? "established" : "forming")) + " • Arc: " + (link.arc || "steady") + " • Trajectory: " + (link.trajectory || "steady"));
+    lines.push("  Read: " + CW_pressureText(link.scores));
+    if (link.trustDomains) lines.push("  Trust: " + CW_trustDomainText(link.trustDomains));
+    if (link.threads && link.threads.length) lines.push("  Live threads: " + link.threads.slice(0,3).map(function(x){return x.label;}).join(" • "));
+    if (link.needs && link.needs.length) lines.push("  Needs: " + link.needs.slice(0,3).map(function(x){return x.label;}).join(" • "));
+    if (link.baseline && link.baseline.evidence && link.baseline.evidence.length) {
+      lines.push("  Recovered: " + (link.baseline.source || "existing story") + " — " + CW_clipText(link.baseline.evidence[link.baseline.evidence.length-1], 145));
+    }
+    if (detail === "DETAILED") {
+      if (link.power && link.power !== "balanced") lines.push("  Power: " + link.power);
+      if (link.resilience) lines.push("  Resilience: " + link.resilience);
+      if (link.unresolved) lines.push("  Unresolved: " + link.unresolved);
+      if (link.shockActive) lines.push("  Emotional inertia: active after " + String(link.shockKind || "major damage").replace(/_/g," "));
+      const anchors = CW_anchorMemories(link, Math.min(2, cfg.memoryAnchors));
+      if (anchors.length) lines.push("  Turning points: " + anchors.map(function(e){ return CW_clipText(e.note || e.kind.replace(/_/g," "), 100); }).join(" / "));
+      if (link.memories && link.memories.length) lines.push("  Recent: " + link.memories.slice(-2).map(function(e){ return CW_clipText(e.note || e.kind.replace(/_/g," "), 100); }).join(" / "));
+      if (cfg.behaviorGuidance) {
+        const behavior = CW_behaviorGuidance(link);
+        if (behavior) lines.push("  Story effect: " + CW_clipText(behavior, 260));
+      }
+      if (cfg.showExactNumbersInDashboard) lines.push("  Scores: " + CW_scoreText(link.scores));
+    }
+  }
+  lines.push("");
+  lines.push("How Crossed Wires is using this card: the Entry/user Notes can establish existing relationships; future story events update the live bond state. This managed block is UI/reference only and is excluded from relationship evidence scanning.");
+  lines.push(isPlayerCard ? "Inspect all NPC → YOU bonds: /wires • Re-scan accessible history/cards: /wire rescan" : "Inspect live details: /wire " + canonical + " • Re-scan accessible history/cards: /wire rescan");
+  lines.push(CW_CHARACTER_NOTES_END);
+  return lines.join("\n");
+}
+
+function CW_writeCharacterCardNotes(card, managedBlock) {
+  if (!card || typeof storyCards === "undefined" || !Array.isArray(storyCards)) return false;
+  const index = storyCards.indexOf(card);
+  if (index < 0) return false;
+  const rawNotes = String(card.description || card.notes || "");
+  const userNotes = CW_stripManagedCharacterNotes(rawNotes);
+  let prefix = userNotes;
+  if (prefix && !/\n\s*\n$/.test(prefix)) prefix += prefix.endsWith("\n") ? "\n" : "\n\n";
+  const nextNotes = prefix + managedBlock;
+  if (nextNotes === rawNotes) return false;
+  try {
+    if (typeof updateStoryCard === "function") {
+      updateStoryCard(index, CW_cardKeysText(card), String(card.entry || ""), String(card.type || "Character"), String(card.title || card.name || ""), nextNotes);
+    }
+  } catch (e) {
+    // The documented API only guarantees keys/entry/type. Direct mutation below
+    // keeps Notes support compatible with sandboxes that expose notes fields on
+    // storyCards but use the legacy update signature.
+  }
+  const current = storyCards[index] || card;
+  current.description = nextNotes;
+  current.notes = nextNotes;
+  return true;
+}
+
+function CW_characterCardNotesStateSig(cfg) {
+  const cw = state.crossedWires;
+  const ledgerTail = (cw.ledger || []).slice(-64).map(function(e){ return [e.turn,e.from,e.to,e.kind,e.severity,e.note].join("|"); }).join(";");
+  const archiveTail = (cw.archivedAnchors || []).slice(-32).map(function(e){ return [e.turn,e.from,e.to,e.kind,e.severity,e.note].join("|"); }).join(";");
+  const baselineSig = Object.keys(cw.baselines || {}).sort().map(function(k){ const b=cw.baselines[k]||{}; return [k,b.role,b.tone,b.confidence,b.turn,(b.evidence||[]).slice(-1)[0]||""].join("|"); }).join(";");
+  const roleSig = (cw.roleHistory || []).slice(-80).map(function(r){ return [r.fromKey,r.toKey,r.role,r.turn].join("|"); }).join(";");
+  const ageSig = Object.keys(cw.npcs || {}).sort().map(function(k){ const n=cw.npcs[k]||{}; return k+":"+(n.adultStatus||"unknown"); }).join(";");
+  const castSig = Object.keys(cw.pinnedNpcs||{}).sort().join(",") + "/" + Object.keys(cw.mutedNpcs||{}).sort().join(",");
+  const cardRoster = (typeof storyCards !== "undefined" && Array.isArray(storyCards)) ? storyCards.map(function(c,i){ if(!c)return ""; const type=String(c.type||"").toLowerCase(), title=String(c.title||c.name||""); const marker=String(c.description||c.notes||"").indexOf(CW_CHARACTER_NOTES_START)>=0?"1":"0"; return [c.id!=null?c.id:i,type,title,marker].join("|"); }).join(";") : "";
+  const cfgSig = [cfg.characterCardNotesDetail,cfg.characterCardNotesMaxBonds,cfg.showExactNumbersInDashboard,cfg.trustDomains,cfg.bondStages,cfg.socialThreads,cfg.powerDynamics,cfg.bondResilience,cfg.behaviorGuidance,cfg.memoryAnchors].join("|");
+  return CW_fastSig([cw.ledger.length,ledgerTail,cw.archivedAnchors.length,archiveTail,baselineSig,roleSig,ageSig,castSig,cardRoster,cfgSig].join("\n"));
+}
+
+function CW_syncCharacterCardNotes(turn, reason, force) {
+  const cfg = CW_config();
+  if (!cfg.characterCardNotes || typeof storyCards === "undefined" || !Array.isArray(storyCards)) return 0;
+  const cw = state.crossedWires;
+  cw.cardNotesSync = cw.cardNotesSync && typeof cw.cardNotesSync === "object" ? cw.cardNotesSync : {digests:{},lastTurn:-1,updates:0};
+  cw.cardNotesSync.digests = cw.cardNotesSync.digests && typeof cw.cardNotesSync.digests === "object" ? cw.cardNotesSync.digests : {};
+  const stateSig = CW_characterCardNotesStateSig(cfg);
+  if (!force && cw.cardNotesSync.lastStateSig === stateSig) return 0;
+  let updates = 0;
+  const linksByKey = {};
+  for (const pair of CW_pairKeys()) {
+    const link = CW_computeLink(pair.from, pair.to, turn);
+    if (!link) continue;
+    const fk = CW_key(link.from), tk = CW_key(link.to);
+    if (!linksByKey[fk]) linksByKey[fk] = [];
+    linksByKey[fk].push(link);
+    if (!linksByKey[tk]) linksByKey[tk] = [];
+    linksByKey[tk].push(link);
+  }
+  for (let i=0; i<storyCards.length; i++) {
+    const card = storyCards[i];
+    if (!CW_isCharacterStoryCard(card)) continue;
+    const canonical = CW_characterCardCanonical(card);
+    if (!canonical) continue;
+    const isPlayerCard = canonical === "YOU" || CW_isPlayerName(canonical);
+    if (!isPlayerCard) CW_registerNpc(canonical, turn, CW_detectAdultFromEntry(String(card.entry || "") + "\n" + CW_stripManagedCharacterNotes(String(card.description || card.notes || ""))), false);
+    const npcKey = isPlayerCard ? "you" : (CW_resolveNpcKey(CW_key(canonical)) || CW_key(canonical));
+    const block = CW_characterCardNotesBlock(card, canonical, turn, cfg, linksByKey[npcKey] || []);
+    const digest = CW_fastSig(block);
+    const cardKey = String(card.id != null ? card.id : (card.title || card.name || i));
+    const currentManaged = CW_extractManagedCharacterNotes(String(card.description || card.notes || ""));
+    if (currentManaged && CW_fastSig(currentManaged) === digest) {
+      cw.cardNotesSync.digests[cardKey] = digest;
+      continue;
+    }
+    if (CW_writeCharacterCardNotes(card, block)) {
+      updates++;
+      cw.cardNotesSync.digests[cardKey] = digest;
+    }
+  }
+  cw.cardNotesSync.lastTurn = Number(turn)||0;
+  cw.cardNotesSync.lastReason = String(reason || "sync");
+  cw.cardNotesSync.lastStateSig = stateSig;
+  cw.cardNotesSync.updates = (Number(cw.cardNotesSync.updates)||0) + updates;
+  return updates;
 }
 
 function CW_handleUndo(turn) {
@@ -3030,10 +3291,15 @@ function CW_computeLink(from, to, turn) {
   const trajectory = events.length ? CW_trajectory(events) : "steady";
   const role = CW_getRole(resolvedFrom, resolvedTo);
   let arc = CW_relationshipArc(scores, flags, events, role, trajectory);
-  if (baseline && events.length === 0 && arc === "forming") arc = role !== "unknown" ? "established " + CW_roleDisplay(role) : "established";
+  if (baseline && Number(baseline.confidence || 0) >= 2 && arc === "forming") arc = role !== "unknown" ? "established " + CW_roleDisplay(role) : "established";
   const needs = CW_relationshipNeeds(scores, flags, events, role, trajectory);
   const domains = cfg.trustDomains ? CW_trustDomains(events) : null;
-  const stage = cfg.bondStages ? CW_bondStage(scores, flags, familiarity, events, arc) : "";
+  let stage = cfg.bondStages ? CW_bondStage(scores, flags, familiarity, events, arc) : "";
+  // An explicit/recovered established role is not a newcomer relationship. Keep
+  // the emotional quality conservative, but do not label a spouse, parent,
+  // sibling, longtime friend, etc. as merely provisional just because the script
+  // itself only discovered that history today.
+  if (baseline && Number(baseline.confidence || 0) >= 2 && role !== "unknown" && ["provisional","developing"].includes(stage)) stage = "established";
   const threads = cfg.socialThreads ? CW_liveThreads(scores, flags, events, role) : [];
   const power = cfg.powerDynamics ? CW_powerDynamic(role, events, scores) : "";
   const resilience = cfg.bondResilience ? CW_bondResilienceLevel(scores, familiarity, flags, cfg.emotionalInertia && turn <= shockUntil) : "";
@@ -4326,7 +4592,7 @@ function CW_configIssues() {
   if (!card || !card.entry) return ["Config card is missing; defaults are being used."];
   const map = CW_configMap(card.entry);
   const issues = [];
-  const boolKeys = ["ENABLED", "NPC INITIATIVE", "ARC GUIDANCE", "RELATIONSHIP NEEDS", "GROUP DYNAMICS", "REPETITION DAMPING", "EMOTIONAL INERTIA", "TRUST DOMAINS", "BOND STAGES", "SOCIAL THREADS", "POWER DYNAMICS", "BOND RESILIENCE", "CAST BALANCE", "RELATIONSHIP BACKFILL", "CARD RELATIONSHIP SCAN", "BEHAVIOR GUIDANCE", "ROLE AWARENESS", "ROLE INFERENCE", "SCENARIO TWISTS", "OFFSCREEN TWISTS", "TWIST NEED BIAS", "TWIST DIVERSITY", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "ADAPTIVE PROTOCOL", "VISIBLE PULSE", "PULSE RECOVERED BONDS", "PULSE TWISTS", "DASHBOARD NUMBERS"];
+  const boolKeys = ["ENABLED", "NPC INITIATIVE", "ARC GUIDANCE", "RELATIONSHIP NEEDS", "GROUP DYNAMICS", "REPETITION DAMPING", "EMOTIONAL INERTIA", "TRUST DOMAINS", "BOND STAGES", "SOCIAL THREADS", "POWER DYNAMICS", "BOND RESILIENCE", "CAST BALANCE", "RELATIONSHIP BACKFILL", "CARD RELATIONSHIP SCAN", "BEHAVIOR GUIDANCE", "CHARACTER CARD NOTES", "ROLE AWARENESS", "ROLE INFERENCE", "SCENARIO TWISTS", "OFFSCREEN TWISTS", "TWIST NEED BIAS", "TWIST DIVERSITY", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "ADAPTIVE PROTOCOL", "VISIBLE PULSE", "PULSE RECOVERED BONDS", "PULSE TWISTS", "DASHBOARD NUMBERS"];
   const boolValues = ["on", "yes", "true", "1", "enabled", "enable", "off", "no", "false", "0", "disabled", "disable"];
   for (const key of boolKeys) {
     if (map[key] == null) issues.push("Missing " + key.toLowerCase() + " (default used)");
@@ -4338,7 +4604,8 @@ function CW_configIssues() {
     "SCENARIO MODE": CW_SCENARIO_MODES,
     "ADAPTATION STRENGTH": ["LIGHT", "BALANCED", "FULL"],
     "TWIST MODE": ["OFF", "GROUNDED", "DRAMATIC", "WILD", "UNHINGED"],
-    "PULSE DETAIL": ["SUBTLE", "STANDARD", "DETAILED"]
+    "PULSE DETAIL": ["SUBTLE", "STANDARD", "DETAILED"],
+    "CARD NOTES DETAIL": ["COMPACT", "STANDARD", "DETAILED"]
   };
   for (const key in enums) {
     if (map[key] == null) {
@@ -4354,7 +4621,7 @@ function CW_configIssues() {
     "ACTIVE BONDS": [1, 12], "MEMORY ANCHORS": [0, 3], "SHOCK WINDOW": [2, 20], "PROFILE STABILITY": [0, 12], "SCENE HISTORY": [2, 10],
     "CONTEXT BUDGET": [2400, 8000], "ARCHIVE ANCHORS": [200, 1200], "BACKFILL HISTORY": [5, 120], "TWISTS START AFTER": [0, 100],
     "TWIST COOLDOWN": [2, 30], "TWIST SCENE WINDOW": [1, 5], "PAIR TWIST COOLDOWN": [2, 40], "REPEAT TWIST COOLDOWN": [4, 100],
-    "PULSE MINIMUM SEVERITY": [1, 3], "PULSE HEARTBEAT": [0, 30]
+    "PULSE MINIMUM SEVERITY": [1, 3], "PULSE HEARTBEAT": [0, 30], "CARD NOTES BONDS": [1, 20]
   };
   for (const key in nums) {
     if (map[key] == null) { issues.push("Missing " + key.toLowerCase() + " (default used)"); continue; }
@@ -4482,6 +4749,7 @@ function CW_status() {
     "Cast controls: " + Object.keys(cw.pinnedNpcs || {}).length + " pinned | " + Object.keys(cw.mutedNpcs || {}).length + " muted | manual locks: " + (Object.keys(cw.manualRoleLocks || {}).length + Object.keys(cw.manualAgeLocks || {}).length),
     "Observation: " + cfg.observationTurns + " turns + " + cfg.observationAppearances + " appearances | active bonds: " + cfg.maxContextRelationships + " | cast balance: " + (cfg.castBalance ? "ON" : "OFF") + " | memory anchors: " + cfg.memoryAnchors,
     "Existing-bond recovery: " + (cfg.relationshipBackfill ? "ON" : "OFF") + " | baselines: " + Object.keys(cw.baselines || {}).length + " | card scan: " + (cfg.baselineFromCards ? "ON" : "OFF") + " | backfill history: " + cfg.backfillHistoryActions + " actions | behavior guidance: " + (cfg.behaviorGuidance ? "ON" : "OFF"),
+    "Character Card Notes: " + (cfg.characterCardNotes ? "ON (" + cfg.characterCardNotesDetail + ", up to " + cfg.characterCardNotesMaxBonds + " bonds/card)" : "OFF") + " | managed panels: " + ((typeof storyCards !== "undefined" && Array.isArray(storyCards)) ? storyCards.filter(function(c){ return c && String(c.description || c.notes || "").indexOf(CW_CHARACTER_NOTES_START) >= 0; }).length : 0),
     "Twist intelligence: need bias " + (cfg.twistNeedBias ? "ON" : "OFF") + " | diversity " + (cfg.twistDiversity ? "ON" : "OFF"),
     "Visible pulse: " + (cfg.visiblePulse ? "ON (" + cfg.pulseDetail + ", severity ≥" + cfg.pulseMinSeverity + ", heartbeat " + cfg.pulseHeartbeatTurns + ")" : "OFF"),
     "Context budget: " + cfg.contextBudgetChars + " chars | scene window: " + cfg.sceneHistoryActions + " actions | twist scene window: " + cfg.twistSceneWindow,
@@ -4528,6 +4796,7 @@ function CW_help() {
     "/wire pulse subtle|standard|detailed — choose pulse detail",
     "/wire pulse test              — preview a pulse without changing relationship state",
     "/wire rescan                  — force a fresh scan of available history/cards for existing relationships",
+    "/wire cards                   — re-scan Character Story Cards and refresh their managed Notes panels",
     "",
     "Cast management",
     "/wire pin NAME                — keep an important NPC continuity-eligible off-screen",
@@ -4567,7 +4836,7 @@ function CW_commandNameArg(raw) {
   return s.replace(/\s+$/g, "").trim();
 }
 
-const CW_COMMAND_ROOT_RE = "(?:wire(?:merge|age|role|unlockage|unlockrole|mute|unmute|pin|unpin|forget|cast|twists|status|profile|pulse|help)?|wires|spark|cw)";
+const CW_COMMAND_ROOT_RE = "(?:wire(?:merge|age|role|unlockage|unlockrole|mute|unmute|pin|unpin|forget|cast|cards|twists|status|profile|pulse|help)?|wires|spark|cw)";
 
 function CW_extractCommandText(raw) {
   let s = String(raw || "").replace(/[\u200B\u200C\u200D\u2060\u2063\uFEFF]/g, "").trim();
@@ -4609,6 +4878,7 @@ function CW_parseWireSubcommand(body) {
   if (/^cast$/i.test(b)) return { type: "cast" };
   if (/^(?:test|diagnostics?|check)$/i.test(b)) return { type: "test" };
   if (/^(?:rescan|backfill|scan)$/i.test(b)) return { type: "rescan" };
+  if (/^(?:cards|cardsync|cardscan)$/i.test(b)) return { type: "cards" };
   let pm = b.match(/^pulse(?:\s+(on|off|subtle|standard|detailed|test))?$/i);
   if (pm) return { type: "pulse", action: String(pm[1] || "status").toLowerCase() };
 
@@ -4665,6 +4935,7 @@ function CW_readCommand(text) {
   // Direct slash aliases retained for quick use and compatibility.
   if (/^\/wires\s*$/i.test(s)) return { type: "all" };
   if (/^\/wirecast\s*$/i.test(s)) return { type: "cast" };
+  if (/^\/wirecards\s*$/i.test(s)) return { type: "cards" };
   if (/^\/wiretwists\s*$/i.test(s)) return { type: "twists" };
   if (/^\/wirestatus\s*$/i.test(s)) return { type: "status" };
   let pulseAlias = s.match(/^\/wirepulse(?:\s+(on|off|subtle|standard|detailed|test))?\s*$/i);
@@ -4732,6 +5003,7 @@ function CW_commandDiagnostics() {
     "Event/twist/role registries: " + (registryIssues.length ? "ERROR — " + registryIssues.slice(0, 3).join("; ") : "OK"),
     "Config: " + (configIssues.length ? "CHECK — " + configIssues.slice(0, 3).join("; ") : "OK"),
     "Config Story Card: " + (card ? "found" : "not visible yet"),
+    "Character Card Notes: " + (CW_config().characterCardNotes ? "ON" : "OFF") + " | managed panels: " + ((typeof storyCards !== "undefined" && Array.isArray(storyCards)) ? storyCards.filter(function(c){ return c && String(c.description || c.notes || "").indexOf(CW_CHARACTER_NOTES_START) >= 0; }).length : 0),
     "Persistent state: " + (stateOk ? "OK" : "ERROR"),
     "Tracked NPCs: " + Object.keys(cw.npcs || {}).length + " | active events: " + (cw.ledger || []).length + " | archived anchors: " + (cw.archivedAnchors || []).length + " | reconstructed baselines: " + Object.keys(cw.baselines || {}).length,
     "Pinned: " + Object.keys(cw.pinnedNpcs || {}).length + " | muted: " + Object.keys(cw.mutedNpcs || {}).length,
@@ -4752,13 +5024,22 @@ function CW_commandResponse(cmd) {
   if (cmd.type === "cast") return CW_castStatus();
   if (cmd.type === "test") return CW_commandDiagnostics();
   if (cmd.type === "pulse") return CW_pulseCommand(cmd.action);
+  if (cmd.type === "cards") {
+    state.crossedWires.backfill.cardsSig = "";
+    CW_RUNTIME_BACKFILL_CACHE = null;
+    const found = CW_runRelationshipBackfill(CW_turn(), "");
+    const updated = CW_syncCharacterCardNotes(CW_turn(), "manual card refresh", true);
+    const panels = (typeof storyCards !== "undefined" && Array.isArray(storyCards)) ? storyCards.filter(function(c){ return c && String(c.description || c.notes || "").indexOf(CW_CHARACTER_NOTES_START) >= 0; }).length : 0;
+    return "Crossed Wires: Character Story Card refresh complete. Relationship detections updated: " + found + ". Notes panels refreshed: " + updated + ". Managed character panels present: " + panels + ".";
+  }
   if (cmd.type === "rescan") {
     state.crossedWires.backfill = { historySig:"", cardsSig:"", contextSig:"", modelContextSig:"", scans:0, lastTurn:-1 };
     CW_RUNTIME_BACKFILL_CACHE = null;
     const before = Object.keys(state.crossedWires.baselines || {}).length;
     const found = CW_runRelationshipBackfill(CW_turn(), CW_recentHistoryText(CW_config().backfillHistoryActions));
     const after = Object.keys(state.crossedWires.baselines || {}).length;
-    return "Crossed Wires: relationship rescan complete. New/updated detections: " + found + ". Established baselines: " + before + " → " + after + ". The scan can only use history/context AI Dungeon currently exposes plus Story Cards.";
+    const cardUpdates = CW_syncCharacterCardNotes(CW_turn(), "manual rescan", true);
+    return "Crossed Wires: relationship rescan complete. New/updated detections: " + found + ". Established baselines: " + before + " → " + after + ". Character Card Notes updated: " + cardUpdates + ". The scan can only use history/context AI Dungeon currently exposes plus Story Cards.";
   }
   if (cmd.type === "unlockage") {
     const changed = CW_unlockAge(cmd.name);
@@ -4868,6 +5149,7 @@ function CW_onInput(text) {
   CW_scanRelationshipText(text, "player input", turn, "");
   CW_touchKnownNpcs(text, turn);
   CW_inferExplicitRoles(text, turn);
+  CW_syncCharacterCardNotes(turn, "input");
   return text;
 }
 
@@ -4922,7 +5204,9 @@ function CW_onOutput(text) {
     // the next relationship context can explicitly de-canonize dashboard text.
     state.crossedWires.lastCommandTurn = turn;
     state.crossedWires.lastCommandType = cmd.type || "";
-    return CW_commandResponse(cmd);
+    const response = CW_commandResponse(cmd);
+    CW_syncCharacterCardNotes(turn, "command");
+    return response;
   }
 
   const cfg = CW_config();
@@ -4938,6 +5222,7 @@ function CW_onOutput(text) {
   CW_touchKnownNpcs(visible, turn);
   CW_inferExplicitRoles(visible + "\n" + CW_recentHistoryText(2), turn);
   state.crossedWires.lastProcessedOutputTurn = turn;
+  CW_syncCharacterCardNotes(turn, "output");
   return visible + CW_buildVisiblePulse(turn);
 }
 

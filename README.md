@@ -56,13 +56,71 @@ The relationship **type** and relationship **quality** are kept separate.
 
 Knowing two characters are married establishes the bond. It does not automatically invent perfect trust, affection or attraction. Those qualities still come from the actual evidence.
 
+Use `/wire rescan` to force a new reconstruction pass over currently accessible history, context and Story Cards.
+
+Use `/wire cards` when you specifically want Character Story Cards re-scanned and their managed Notes panels refreshed immediately.
+
+---
+
+
+## 🗂️ Live Character Story Card Notes
+
+Crossed Wires can turn every Character/NPC Story Card into a live relationship status page without changing the card's Entry.
+
+If the player also has a Character Story Card, its Notes can show the NPC → YOU relationships currently being tracked. Crossed Wires still never invents or scores YOU → NPC feelings, consent or intentions.
+
+When **Character Card Notes** is enabled, the script carefully appends a managed block to the card's **Notes** section. Your own Notes are preserved exactly outside that block. Only the Crossed Wires section is replaced when relationship state changes.
+
+A character card can show:
+
+- whether Crossed Wires is actively tracking the character
+- how many known bonds and recorded relationship events involve them
+- relationships recovered from that card, history or other accessible context
+- relationship role and direction
+- bond stage, arc and trajectory
+- current trust read
+- unresolved social threads and relationship needs
+- recovered baseline evidence/source
+- major turning points and recent memories in DETAILED mode
+- behavioral effect guidance in DETAILED mode
+- pin/mute status and age classification
+
+Example:
+
+```text
+----- ⚡ CROSSED WIRES — CHARACTER STATUS -----
+Tracking: ACTIVE • relationship scan ON • history backfill ON
+Character: Maya Walker • age status: adult
+Known bonds: 3 • recovered baselines: 2 • recorded relationship events: 12
+
+RELATIONSHIPS
+• Maya Walker → YOU [aunt/uncle]
+  Stage: established • Arc: repairing • Trajectory: warming
+  Read: strong affection with damaged trust
+  Live threads: damaged trust • family boundaries
+  Recovered: story card — Maya Walker is your aunt
+
+• Maya Walker → Sera Walker [sibling]
+  Stage: close • Arc: stable close bond • Trajectory: steady
+  Read: strong trust and loyalty
+----- END CROSSED WIRES STATUS -----
+```
+
+The managed Notes block is deliberately excluded from future relationship scanning, so Crossed Wires cannot read its own dashboard as new evidence and reinforce itself.
+
+Three display depths are available:
+
+- **COMPACT** — role, stage and arc
+- **STANDARD** — adds trust read, live threads, needs and recovered-source information
+- **DETAILED** — adds power/resilience, turning points, recent memories, behavior guidance and optional exact numbers
+
 Use:
 
 ```text
-/wire rescan
+/wire cards
 ```
 
-to force a new reconstruction pass over currently accessible information.
+to force a fresh Character Story Card relationship scan and refresh the managed Notes panels.
 
 ---
 
