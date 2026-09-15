@@ -9,7 +9,7 @@
 // state, scoring, pacing, scars, milestones, trajectory and twist selection.
 // ============================================================================
 
-const CW_ENGINE_VERSION = 13;
+const CW_ENGINE_VERSION = 14;
 
 let CW_RUNTIME_EVENT_INDEX = null;
 let CW_RUNTIME_CONFIG_CACHE = null;
@@ -51,6 +51,8 @@ const CW_DEFAULT_CONFIG = {
   bondResilience: true,              // established healthy bonds resist trivial damage without ignoring serious harm
   castBalance: true,                 // diversify active relationship context across ensemble casts
   relationshipBackfill: true,         // reconstruct established bonds from accessible history/cards/context
+  autoFormBonds: true,                 // recurring NPCs graduate into neutral acquaintance bonds even without explicit tags
+  autoFormNpcNpc: true,                // recurring NPC pairs can graduate into neutral associate bonds after repeated shared scenes
   backfillHistoryActions: 40,          // recent history actions inspected for pre-existing relationships
   baselineFromCards: true,             // scan character/story cards for explicit relationship facts
   behaviorGuidance: true,              // turn relationship state into concrete NPC behavior guidance
@@ -669,6 +671,10 @@ function CW_init() {
   cw.pinnedNpcs = cw.pinnedNpcs && typeof cw.pinnedNpcs === "object" ? cw.pinnedNpcs : {};
   cw.baselines = cw.baselines && typeof cw.baselines === "object" ? cw.baselines : {};
   cw.backfill = cw.backfill && typeof cw.backfill === "object" ? cw.backfill : { historySig:"", cardsSig:"", contextSig:"", scans:0, lastTurn:-1 };
+  cw.formation = cw.formation && typeof cw.formation === "object" ? cw.formation : { historySig:"", pairScenes:{}, formed:0, discovered:0, lastTurn:-1 };
+  cw.formation.pairScenes = cw.formation.pairScenes && typeof cw.formation.pairScenes === "object" ? cw.formation.pairScenes : {};
+  if (!Number.isFinite(Number(cw.formation.formed))) cw.formation.formed = 0;
+  if (!Number.isFinite(Number(cw.formation.discovered))) cw.formation.discovered = 0;
   cw.cardNotesSync = cw.cardNotesSync && typeof cw.cardNotesSync === "object" ? cw.cardNotesSync : { digests:{}, lastTurn:-1, updates:0 };
   cw.cardNotesSync.digests = cw.cardNotesSync.digests && typeof cw.cardNotesSync.digests === "object" ? cw.cardNotesSync.digests : {};
   cw.cardNotesSync.lastStateSig = String(cw.cardNotesSync.lastStateSig || "");
@@ -872,6 +878,8 @@ function CW_defaultConfigEntryFrom(cfg) {
     "Bond Resilience: " + (c.bondResilience ? "ON" : "OFF"),
     "Cast Balance: " + (c.castBalance ? "ON" : "OFF"),
     "Relationship Backfill: " + (c.relationshipBackfill ? "ON" : "OFF"),
+    "Auto Form Bonds: " + (c.autoFormBonds ? "ON" : "OFF"),
+    "Auto Form NPC-NPC: " + (c.autoFormNpcNpc ? "ON" : "OFF"),
     "Backfill History: " + c.backfillHistoryActions,
     "Card Relationship Scan: " + (c.baselineFromCards ? "ON" : "OFF"),
     "Behavior Guidance: " + (c.behaviorGuidance ? "ON" : "OFF"),
@@ -960,6 +968,8 @@ function CW_configNotes() {
     "• Bond Resilience — ON gives mature, healthy, well-established bonds resistance to severity-1 everyday friction. A snappy argument can still raise tension, but it will not erase years of trust. Betrayal, coercion, serious deception, abandonment and boundary harm are never softened by resilience.",
     "• Cast Balance — ON tries to represent different people in ensemble scenes before spending multiple context slots on several bonds involving the same NPC. OFF uses pure relevance/recency ranking.",
     "• Relationship Backfill — ON reconstructs already-established bonds from the recent history available to scripts, Character/Story Cards, placeholders and explicit relationship text. It is conservative: a role can be recovered without inventing that the relationship is healthy.",
+    "• Auto Form Bonds — ON guarantees that a recurring named NPC does not remain relationship-less forever. Once the existing Observation Turns + Observation Appearances gates are satisfied, Crossed Wires creates a neutral acquaintance baseline to YOU if no stronger/explicit bond exists. This establishes familiarity only; it does not invent friendship, attraction, trust or affection.",
+    "• Auto Form NPC-NPC — ON lets repeatedly co-present recurring NPCs form a neutral associate baseline after enough shared scenes. Explicit family/friendship/romance/professional roles always override this generic fallback. OFF keeps NPC↔NPC relationships dependent on explicit evidence/events.",
     "• Backfill History — 5–120 recent history actions to inspect for explicit pre-existing relationship evidence when AI Dungeon exposes them to the script. The platform only provides recent history, so Crossed Wires progressively learns older relationships as evidence becomes available.",
     "• Card Relationship Scan — ON scans Character/NPC Story Cards and relationship-style card text for explicit family, friendship, romance, rivalry, professional and other established bonds, even when those cards are not currently triggered for the narrator.",
     "• Behavior Guidance — ON translates relationship state into concrete, non-forced behavior tendencies such as willingness to confide, cooperate, challenge, protect, avoid, seek reassurance or keep distance. This is guidance, never guaranteed behavior or player control.",
@@ -1075,6 +1085,8 @@ function CW_configFromEntry(entry) {
   cfg.bondResilience = CW_parseBool(map["BOND RESILIENCE"], cfg.bondResilience);
   cfg.castBalance = CW_parseBool(map["CAST BALANCE"], cfg.castBalance);
   cfg.relationshipBackfill = CW_parseBool(map["RELATIONSHIP BACKFILL"], cfg.relationshipBackfill);
+  cfg.autoFormBonds = CW_parseBool(map["AUTO FORM BONDS"], cfg.autoFormBonds);
+  cfg.autoFormNpcNpc = CW_parseBool(map["AUTO FORM NPC-NPC"], cfg.autoFormNpcNpc);
   cfg.backfillHistoryActions = CW_readNumber(map["BACKFILL HISTORY"], cfg.backfillHistoryActions, 5, 120);
   cfg.baselineFromCards = CW_parseBool(map["CARD RELATIONSHIP SCAN"], cfg.baselineFromCards);
   cfg.behaviorGuidance = CW_parseBool(map["BEHAVIOR GUIDANCE"], cfg.behaviorGuidance);
@@ -1165,14 +1177,13 @@ function CW_upgradeConfigCard(card) {
   if (!card) return;
   const notes = String(card.description || card.notes || "");
   const cleanIdentity = String(card.title || card.name || "") === CW_CONFIG_TITLE && !CW_cardKeysText(card).includes("__crossed_wires_config__");
-  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 13) return;
-  if (cleanIdentity && notes.includes(CW_CONFIG_MARKER)) {
-    if (state.crossedWires) state.crossedWires.configCardVersion = 13;
-    return;
-  }
+  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 14) return;
+  // Existing clean cards from older builds still need their Entry/Notes rewritten
+  // when the config schema gains settings. Parse the old Entry first so custom
+  // choices survive, then write the current schema around those choices.
   const migrated = CW_configFromEntry(card.entry);
   CW_writeConfigCard(card, migrated);
-  if (state.crossedWires) state.crossedWires.configCardVersion = 13;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 14;
 }
 
 function CW_ensureConfigCard() {
@@ -1190,11 +1201,11 @@ function CW_ensureConfigCard() {
   try {
     // Newer AI Dungeon builds accept name/title and notes after the documented
     // keys/entry/type arguments. Older builds simply use the first three.
-    const result = addStoryCard("__cw_config_bootstrap_13__", entry, "Custom", CW_CONFIG_TITLE, notes);
+    const result = addStoryCard("__cw_config_bootstrap_14__", entry, "Custom", CW_CONFIG_TITLE, notes);
     if (Number.isFinite(Number(result))) createdIndex = Number(result);
   } catch (e) {
     try {
-      const result = addStoryCard("__cw_config_bootstrap_13__", entry, "Custom");
+      const result = addStoryCard("__cw_config_bootstrap_14__", entry, "Custom");
       if (Number.isFinite(Number(result))) createdIndex = Number(result);
     } catch (fallbackError) {
       if (typeof log === "function") log("Crossed Wires: could not create config card: " + fallbackError);
@@ -1225,7 +1236,7 @@ function CW_ensureConfigCard() {
   card.name = CW_CONFIG_TITLE;
   card.description = notes;
   card.notes = notes;
-  if (state.crossedWires) state.crossedWires.configCardVersion = 13;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 14;
   CW_RUNTIME_CONFIG_CARD = card;
   CW_RUNTIME_CONFIG_CACHE = null;
   CW_RUNTIME_CONFIG_ENTRY = null;
@@ -1784,7 +1795,7 @@ function CW_inferExplicitRoles(text, turn, markSeen) {
   if (!source.trim()) return 0;
   let changed = 0;
   const seen = markSeen !== false;
-  const nameToken = "[A-ZÀ-ÖØ-ÞĀ-ſА-ЯЁ][A-Za-zÀ-ÖØ-öø-ÿĀ-ſА-яЁё0-9'’\-]*";
+  const nameToken = "[A-ZÀ-ÖØ-ÞА-ЯЁ][A-Za-zÀ-ÖØ-öø-ÿĀ-ſА-яЁё0-9'’\-]*";
   const namePattern = "(" + nameToken + "(?:\\s+(?:" + nameToken + "|[0-9]+)){0,3})";
 
   for (const def of CW_EXPLICIT_ROLE_TERMS) {
@@ -1990,7 +2001,7 @@ function CW_relationshipTermPattern() {
 function CW_backfillNamePattern() {
   // Conservative proper-name shape used only next to explicit relationship words.
   // Digits are allowed for codenames (Unit 9, Agent47, C-3PO).
-  const tok = "[A-ZÀ-ÖØ-ÞĀ-ſА-ЯЁ][A-Za-zÀ-ÖØ-öø-ÿĀ-ſА-яЁё0-9'’\\-]*";
+  const tok = "[A-ZÀ-ÖØ-ÞА-ЯЁ][A-Za-zÀ-ÖØ-öø-ÿĀ-ſА-яЁё0-9'’\\-]*";
   return "(" + tok + "(?:\\s+(?:" + tok + "|[0-9]+)){0,3})";
 }
 
@@ -2161,6 +2172,243 @@ function CW_scanRelationshipText(text, source, turn, canonicalHint) {
     }
   }
   return changed;
+}
+
+
+function CW_likelyNpcNameCandidates(text) {
+  // Conservative person-name mining used only to bootstrap recurring characters
+  // from accessible history when no Character Card/model tag registered them.
+  // A candidate is not accepted as an NPC until it appears in multiple separate
+  // actions, so locations/titles seen once do not immediately become characters.
+  const raw = CW_stripPulseLines(String(text || ""));
+  if (!raw.trim()) return [];
+  const out = [];
+  const seen = {};
+  const stop = {
+    "the":1,"a":1,"an":1,"you":1,"your":1,"yours":1,"he":1,"she":1,"they":1,"his":1,"her":1,"their":1,
+    "it":1,"this":1,"that":1,"these":1,"those":1,"we":1,"our":1,"i":1,"my":1,"me":1,"from":1,"after":1,
+    "before":1,"later":1,"meanwhile":1,"suddenly":1,"finally":1,"today":1,"tonight":1,"morning":1,"afternoon":1,
+    "evening":1,"monday":1,"tuesday":1,"wednesday":1,"thursday":1,"friday":1,"saturday":1,"sunday":1
+  };
+  const entityTail = /\b(?:books?|street|road|avenue|lane|city|town|village|hospital|school|university|college|house|tower|building|room|office|company|corp|corporation|inc|ltd|hotel|cafe|café|bar|restaurant|station|park|kingdom|empire|republic|department|agency|team|club|store|shop)$/i;
+  function add(candidate) {
+    let clean = CW_cleanName(candidate || "");
+    if (!clean || CW_isPlayerName(clean)) return;
+    const words = clean.split(/\s+/);
+    if (!words.length || words.length > 4) return;
+    if (stop[CW_key(clean)] || words.every(function(w){ return !!stop[CW_key(w)]; })) return;
+    if (entityTail.test(clean)) return;
+    if (/^[A-Z]{2,8}$/.test(clean) && clean.length > 3) return; // likely acronym rather than a person
+    const key = CW_key(clean);
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    out.push(clean);
+  }
+
+  const token = "[A-ZÀ-ÖØ-ÞА-ЯЁ][A-Za-zÀ-ÖØ-öø-ÿĀ-ſА-яЁё0-9'’\\-]{1,28}";
+  const name = "(" + token + "(?:\\s+" + token + "){0,2})";
+  const actions = "says|said|asks|asked|replies|replied|answers|answered|whispers|whispered|shouts|shouted|laughs|laughed|smiles|smiled|nods|nodded|frowns|frowned|grins|grinned|looks|looked|turns|turned|walks|walked|steps|stepped|enters|entered|approaches|approached|glances|glanced|sighs|sighed|leans|leaned|shrugs|shrugged|sits|sat|stands|stood|runs|ran|moves|moved|pauses|paused|reaches|reached|takes|took|gives|gave";
+  const actorRe = new RegExp("(?:^|[.!?]\\s+|\\n)" + name + "\\s+(?:" + actions + ")\\b", "g");
+  let m;
+  while ((m = actorRe.exec(raw)) !== null) add(m[1]);
+
+  const attrRe = new RegExp("[\\\"”’']\\s*,?\\s*(?:" + actions + ")\\s+" + name + "\\b", "g");
+  while ((m = attrRe.exec(raw)) !== null) add(m[1]);
+
+  const titledRe = new RegExp("\\b(?:Dr|Doctor|Professor|Prof|Captain|Commander|Detective|Officer|Agent|Sergeant|Sgt|Lieutenant|Lt|General|Coach|Director|Inspector)\\.?\\s+" + name + "\\b", "g");
+  while ((m = titledRe.exec(raw)) !== null) add(m[1]);
+
+  // Mid-sentence direct interaction is another strong person signal. Keep the
+  // pattern tied to a player/social verb so repeated place names are not mined.
+  const directRe = new RegExp("\\b(?:You|you)\\s+(?:look|glance|turn|speak|talk|walk|sit|stand|nod|smile|shout|call|wave|reach|move|step|lean)\\w*\\s+(?:at|to|with|towards?|beside|near)\\s+" + name + "\\b", "g");
+  while ((m = directRe.exec(raw)) !== null) add(m[1]);
+
+  const possessiveRe = new RegExp("\\b" + name + "['’]s\\s+(?:voice|eyes|face|expression|hand|hands|smile|laugh|tone|gaze|shoulder|shoulders)\\b", "g");
+  while ((m = possessiveRe.exec(raw)) !== null) add(m[1]);
+
+  return out.slice(0, 16);
+}
+
+function CW_refreshNpcSightings(key) {
+  const cw = state.crossedWires;
+  const npc = cw.npcs[key];
+  if (!npc) return;
+  const turns = cw.sightings.filter(function(x){ return x && x.key === key; }).map(function(x){ return Number(x.turn)||0; });
+  const unique = Array.from(new Set(turns)).sort(function(a,b){ return a-b; });
+  if (!unique.length) return;
+  npc.introducedAt = Math.min(Number(npc.introducedAt)||unique[0], unique[0]);
+  npc.lastSeen = Math.max(Number(npc.lastSeen)||-1, unique[unique.length-1]);
+  npc.lastMentionTurn = Math.max(Number(npc.lastMentionTurn)||-1, unique[unique.length-1]);
+  npc.mentions = Math.max(Number(npc.mentions)||0, unique.length);
+}
+
+function CW_notePairSceneByKeys(aKey, bKey, turn) {
+  if (!aKey || !bKey || aKey === bKey) return;
+  const cw = state.crossedWires;
+  const keys = [aKey,bKey].sort();
+  const pk = keys[0] + "<->" + keys[1];
+  const rec = cw.formation.pairScenes[pk] || { a:keys[0], b:keys[1], turns:[], firstTurn:Number(turn)||0, lastTurn:Number(turn)||0 };
+  const t = Math.max(0, Math.floor(Number(turn)||0));
+  if (!rec.turns.includes(t)) rec.turns.push(t);
+  rec.turns = rec.turns.slice(-40);
+  rec.firstTurn = Math.min(Number(rec.firstTurn)||t, t);
+  rec.lastTurn = Math.max(Number(rec.lastTurn)||t, t);
+  cw.formation.pairScenes[pk] = rec;
+}
+
+function CW_recordSceneCooccurrence(text, turn) {
+  const raw = CW_stripPulseLines(String(text || ""));
+  if (!raw.trim()) return 0;
+  const present = [];
+  for (const key in state.crossedWires.npcs) {
+    const npc = state.crossedWires.npcs[key];
+    if (!npc) continue;
+    const forms = CW_nameFormsForKey(key);
+    if (forms.some(function(n){ return CW_wordPresent(raw, n); })) present.push(key);
+    if (present.length >= 12) break;
+  }
+  let pairs = 0;
+  for (let i=0;i<present.length;i++) for (let j=i+1;j<present.length;j++) {
+    CW_notePairSceneByKeys(present[i], present[j], turn);
+    pairs++;
+  }
+  return pairs;
+}
+
+function CW_seedRecurringNamesFromHistory(turn, force) {
+  const cfg = CW_config();
+  if (!cfg.autoFormBonds || typeof history === "undefined" || !Array.isArray(history) || !history.length) return 0;
+  const cw = state.crossedWires;
+  const entries = history.slice(-cfg.backfillHistoryActions);
+  const sigText = entries.map(function(h){ return h && h.text ? CW_stripPulseLines(h.text) : ""; }).join("\n---\n");
+  const sig = CW_fastSig(sigText);
+  if (!force && cw.formation.historySig === sig) return 0;
+
+  const knownNames = CW_knownNamesForBackfill();
+  const knownMap = {};
+  knownNames.forEach(function(n){ knownMap[CW_key(n)] = n; });
+  const evidence = {};
+  const perAction = [];
+  const baseTurn = Math.max(0, Number(turn)||0);
+
+  function note(name, actionTurn, known) {
+    const clean = CW_cleanName(name);
+    if (!clean || CW_isPlayerName(clean)) return;
+    const key = CW_key(clean);
+    const rec = evidence[key] || { name:clean, turns:[], known:!!known };
+    rec.known = rec.known || !!known;
+    if (!rec.turns.includes(actionTurn)) rec.turns.push(actionTurn);
+    evidence[key] = rec;
+  }
+
+  for (let i=0;i<entries.length;i++) {
+    const raw = entries[i] && entries[i].text ? CW_stripPulseLines(entries[i].text) : "";
+    if (!raw.trim()) { perAction.push({turn:baseTurn - (entries.length-1-i), names:[]}); continue; }
+    const actionTurn = Math.max(0, baseTurn - (entries.length - 1 - i));
+    const names = [];
+    for (const key in knownMap) {
+      const n = knownMap[key];
+      if (CW_wordPresent(raw, n)) { note(n, actionTurn, true); names.push(n); }
+    }
+    for (const n of CW_likelyNpcNameCandidates(raw)) {
+      note(n, actionTurn, !!knownMap[CW_key(n)]);
+      names.push(n);
+    }
+    perAction.push({turn:actionTurn, names:Array.from(new Set(names.map(function(n){ return CW_key(n); })))});
+  }
+
+  let discovered = 0;
+  const acceptedKeys = {};
+  for (const key in evidence) {
+    const rec = evidence[key];
+    rec.turns.sort(function(a,b){ return a-b; });
+    const required = rec.known ? 1 : 2;
+    if (rec.turns.length < required) continue;
+    const existed = !!cw.npcs[CW_resolveNpcKey(key) || key];
+    const npc = CW_registerNpc(rec.name, rec.turns[0], undefined, false);
+    if (!npc) continue;
+    const resolvedKey = CW_resolveNpcKey(CW_key(npc.name)) || CW_key(npc.name);
+    for (const t of rec.turns) CW_noteSighting(resolvedKey, t);
+    CW_refreshNpcSightings(resolvedKey);
+    acceptedKeys[key] = resolvedKey;
+    if (!existed) { discovered++; cw.formation.discovered++; }
+  }
+
+  for (const action of perAction) {
+    const keys = Array.from(new Set(action.names.map(function(k){ return acceptedKeys[k] || CW_resolveNpcKey(k) || ""; }).filter(Boolean)));
+    for (let i=0;i<keys.length;i++) for (let j=i+1;j<keys.length;j++) CW_notePairSceneByKeys(keys[i], keys[j], action.turn);
+  }
+
+  cw.formation.historySig = sig;
+  cw.formation.lastTurn = baseTurn;
+  return discovered;
+}
+
+function CW_hasPairHistory(from, to) {
+  const f = CW_key(CW_resolveNpcName(from) || from);
+  const t = CW_key(to) === "you" ? "you" : CW_key(CW_resolveNpcName(to) || to);
+  if (CW_getBaseline(from, to)) return true;
+  const idx = CW_eventIndex();
+  const key = f + "=>" + t;
+  return !!(idx[key] && idx[key].length);
+}
+
+function CW_autoFormObservedBonds(turn) {
+  const cfg = CW_config();
+  if (!cfg.autoFormBonds) return 0;
+  const cw = state.crossedWires;
+  let formed = 0;
+
+  // A recurring NPC who has satisfied the normal observation gates should never
+  // remain bond-less indefinitely. Create a deliberately neutral acquaintance
+  // baseline; later explicit roles/events can refine or replace it.
+  for (const key in cw.npcs) {
+    const npc = cw.npcs[key];
+    if (!npc || !npc.name || CW_isPlayerName(npc.name)) continue;
+    if (CW_hasPairHistory(npc.name, "YOU")) continue;
+    if (!CW_isMatureName(npc.name, turn)) continue;
+    const roleNow = CW_getRole(npc.name, "YOU");
+    const role = roleNow && !["unknown","stranger"].includes(roleNow) ? roleNow : "acquaintance";
+    const appearances = Math.max(Number(npc.mentions)||0, cw.sightings.filter(function(x){return x && x.key===key;}).length);
+    const evidence = "Recurring character observed across " + appearances + " appearance" + (appearances===1?"":"s") + "; neutral bond formed automatically until stronger relationship evidence defines it.";
+    if (CW_setBaseline(npc.name, "YOU", role, "neutral", 2, evidence, turn, "observed continuity")) {
+      formed++; cw.formation.formed++;
+    }
+  }
+
+  if (cfg.enableNpcNpc && cfg.autoFormNpcNpc) {
+    const requiredScenes = Math.max(3, Number(cfg.observationAppearances)||2);
+    for (const pk in cw.formation.pairScenes) {
+      const rec = cw.formation.pairScenes[pk];
+      if (!rec || !Array.isArray(rec.turns)) continue;
+      const turns = Array.from(new Set(rec.turns.map(Number))).sort(function(a,b){return a-b;});
+      if (turns.length < requiredScenes) continue;
+      if ((turns[turns.length-1] - turns[0]) < Math.max(1, Number(cfg.observationTurns)||0)) continue;
+      const a = cw.npcs[rec.a], b = cw.npcs[rec.b];
+      if (!a || !b || !a.name || !b.name) continue;
+      if (CW_hasPairHistory(a.name,b.name) || CW_hasPairHistory(b.name,a.name)) continue;
+      const roleAB = CW_getRole(a.name,b.name);
+      const role = roleAB && !["unknown","stranger","acquaintance"].includes(roleAB) ? roleAB : "associate";
+      const evidence = "Recurring characters shared " + turns.length + " observed scenes; neutral connection formed automatically until stronger evidence defines it.";
+      if (CW_setBaseline(a.name,b.name,role,"neutral",2,evidence,turn,"shared scenes")) {
+        formed++; cw.formation.formed++;
+      }
+    }
+  }
+  if (formed) {
+    CW_RUNTIME_LINK_CACHE = null;
+    CW_RUNTIME_PAIR_CACHE = null;
+    CW_RUNTIME_RELEVANT_CACHE = null;
+  }
+  return formed;
+}
+
+function CW_runFormationSweep(turn, extraText, forceHistory) {
+  if (!CW_config().autoFormBonds) return { discovered:0, formed:0 };
+  const discovered = CW_seedRecurringNamesFromHistory(turn, !!forceHistory);
+  if (extraText) CW_recordSceneCooccurrence(extraText, turn);
+  const formed = CW_autoFormObservedBonds(turn);
+  return { discovered:discovered, formed:formed };
 }
 
 function CW_fastSig(text) {
@@ -2535,7 +2783,14 @@ function CW_characterCardNotesBlock(card, canonical, turn, cfg) {
   lines.push("");
   lines.push("RELATIONSHIPS");
   if (!limited.length) {
-    lines.push("• No established relationship evidence stored yet. Crossed Wires is watching this character and will update this panel when a bond is recovered or changes.");
+    if (!isPlayerCard && cfg.autoFormBonds) {
+      const elapsed = Math.max(0, Number(turn) - Number(npc.introducedAt || turn));
+      const appearances = Number(npc.mentions || 0);
+      lines.push("• No established bond yet. Formation progress: " + Math.min(elapsed, cfg.observationTurns) + "/" + cfg.observationTurns + " turns • " + Math.min(appearances, cfg.observationAppearances) + "/" + cfg.observationAppearances + " appearances.");
+      lines.push("  Once both gates are met, Crossed Wires will automatically create a neutral acquaintance bond unless stronger relationship evidence is already known.");
+    } else {
+      lines.push("• No established relationship evidence stored yet. Crossed Wires is watching this character and will update this panel when a bond is recovered or changes.");
+    }
   }
   for (const link of limited) {
     const role = CW_getRole(link.from, link.to);
@@ -2552,7 +2807,8 @@ function CW_characterCardNotesBlock(card, canonical, turn, cfg) {
     if (link.threads && link.threads.length) lines.push("  Live threads: " + link.threads.slice(0,3).map(function(x){return x.label;}).join(" • "));
     if (link.needs && link.needs.length) lines.push("  Needs: " + link.needs.slice(0,3).map(function(x){return x.label;}).join(" • "));
     if (link.baseline && link.baseline.evidence && link.baseline.evidence.length) {
-      lines.push("  Recovered: " + (link.baseline.source || "existing story") + " — " + CW_clipText(link.baseline.evidence[link.baseline.evidence.length-1], 145));
+      const sourceName = String(link.baseline.source || "existing story");
+      lines.push("  " + (["observed continuity","shared scenes"].includes(sourceName) ? "Formed automatically" : "Recovered") + ": " + sourceName + " — " + CW_clipText(link.baseline.evidence[link.baseline.evidence.length-1], 145));
     }
     if (detail === "DETAILED") {
       if (link.power && link.power !== "balanced") lines.push("  Power: " + link.power);
@@ -2668,6 +2924,16 @@ function CW_handleUndo(turn) {
     cw.archivedAnchors = (cw.archivedAnchors || []).filter(function (e) { return Number((e && e.turn) || 0) <= turn; });
     CW_invalidateEventIndex();
     cw.sightings = cw.sightings.filter(function (x) { return x.turn <= turn; });
+    if (cw.formation && cw.formation.pairScenes) {
+      for (const pk in cw.formation.pairScenes) {
+        const rec = cw.formation.pairScenes[pk];
+        if (!rec || !Array.isArray(rec.turns)) { delete cw.formation.pairScenes[pk]; continue; }
+        rec.turns = rec.turns.filter(function(t){ return Number(t) <= Number(turn); });
+        if (!rec.turns.length) delete cw.formation.pairScenes[pk];
+        else { rec.firstTurn = Math.min.apply(null, rec.turns); rec.lastTurn = Math.max.apply(null, rec.turns); }
+      }
+      cw.formation.historySig = "";
+    }
     for (const key in cw.npcs) {
       const npc = cw.npcs[key];
       if ((npc.introducedAt || 0) > turn) {
@@ -3422,7 +3688,9 @@ function CW_roleAwareLabel(link) {
   if (!link) return "developing relationship";
   const role = CW_getRole(link.from, link.to);
   const s = link.scores, f = link.flags;
-  if (role === "unknown" || role === "stranger" || role === "acquaintance" || ["romantic","ex"].includes(role)) return CW_label(s, link.familiarity, f);
+  if (role === "acquaintance" && link.baseline && Number(link.baseline.confidence||0) >= 2) return link.familiarity >= 45 ? "familiar acquaintance" : "established acquaintance";
+  if (role === "associate" && link.baseline && Number(link.baseline.confidence||0) >= 2) return "established associate connection";
+  if (role === "unknown" || role === "stranger" || ["romantic","ex"].includes(role)) return CW_label(s, link.familiarity, f);
   const name = CW_roleDisplay(role);
   if (s.trust <= -45 || s.resentment >= 55) return "strained " + name + " bond";
   if (s.trust >= 50 && s.loyalty >= 35) return "trusted " + name + " bond";
@@ -4547,8 +4815,10 @@ function CW_dashboard(filterName) {
     if (cfg.powerDynamics && link.power && link.power !== "balanced") lines.push("Power: " + link.power);
     if (cfg.bondResilience && link.resilience) lines.push("Bond resilience: " + link.resilience);
     if (link.baseline && link.baseline.evidence && link.baseline.evidence.length) {
-      const src = link.baseline.source ? " [" + link.baseline.source + "]" : "";
-      lines.push("Recovered baseline" + src + ": " + CW_clipText(link.baseline.evidence[link.baseline.evidence.length - 1], 150));
+      const srcName = String(link.baseline.source || "");
+      const src = srcName ? " [" + srcName + "]" : "";
+      const auto = ["observed continuity","shared scenes"].includes(srcName);
+      lines.push((auto ? "Auto-formed baseline" : "Recovered baseline") + src + ": " + CW_clipText(link.baseline.evidence[link.baseline.evidence.length - 1], 150));
     }
     if (link.shockActive) lines.push("Emotional inertia: active after " + String(link.shockKind || "major damage").replace(/_/g," ") + ".");
     if (cfg.showExactNumbersInDashboard) lines.push(CW_scoreText(link.scores));
@@ -4573,7 +4843,12 @@ function CW_dashboard(filterName) {
     if (inc) lines.push("\n" + inc);
   }
 
-  if (lines.length === 1) lines.push("\nNo relationship history yet. Recurring named NPCs will be picked up as the story develops.");
+  if (lines.length === 1) {
+    const npcCount = Object.keys(state.crossedWires.npcs || {}).length;
+    if (cfg.autoFormBonds && npcCount) lines.push("\nNo established bonds yet, but " + npcCount + " NPC" + (npcCount===1?" is":"s are") + " being observed. Recurring NPCs automatically form a neutral acquaintance bond after " + cfg.observationTurns + " turns + " + cfg.observationAppearances + " appearances. Use /wire rescan to backfill accessible history now.");
+    else if (cfg.autoFormBonds) lines.push("\nNo bonds yet because no recurring named NPC has been identified. Use /wire rescan to scan accessible history and Story Cards now.");
+    else lines.push("\nNo relationship history yet. Auto Form Bonds is OFF, so a bond requires explicit relationship evidence or a relationship event.");
+  }
   return lines.join("\n");
 }
 
@@ -4592,7 +4867,7 @@ function CW_configIssues() {
   if (!card || !card.entry) return ["Config card is missing; defaults are being used."];
   const map = CW_configMap(card.entry);
   const issues = [];
-  const boolKeys = ["ENABLED", "NPC INITIATIVE", "ARC GUIDANCE", "RELATIONSHIP NEEDS", "GROUP DYNAMICS", "REPETITION DAMPING", "EMOTIONAL INERTIA", "TRUST DOMAINS", "BOND STAGES", "SOCIAL THREADS", "POWER DYNAMICS", "BOND RESILIENCE", "CAST BALANCE", "RELATIONSHIP BACKFILL", "CARD RELATIONSHIP SCAN", "BEHAVIOR GUIDANCE", "CHARACTER CARD NOTES", "ROLE AWARENESS", "ROLE INFERENCE", "SCENARIO TWISTS", "OFFSCREEN TWISTS", "TWIST NEED BIAS", "TWIST DIVERSITY", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "ADAPTIVE PROTOCOL", "VISIBLE PULSE", "PULSE RECOVERED BONDS", "PULSE TWISTS", "DASHBOARD NUMBERS"];
+  const boolKeys = ["ENABLED", "NPC INITIATIVE", "ARC GUIDANCE", "RELATIONSHIP NEEDS", "GROUP DYNAMICS", "REPETITION DAMPING", "EMOTIONAL INERTIA", "TRUST DOMAINS", "BOND STAGES", "SOCIAL THREADS", "POWER DYNAMICS", "BOND RESILIENCE", "CAST BALANCE", "RELATIONSHIP BACKFILL", "AUTO FORM BONDS", "AUTO FORM NPC-NPC", "CARD RELATIONSHIP SCAN", "BEHAVIOR GUIDANCE", "CHARACTER CARD NOTES", "ROLE AWARENESS", "ROLE INFERENCE", "SCENARIO TWISTS", "OFFSCREEN TWISTS", "TWIST NEED BIAS", "TWIST DIVERSITY", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "ADAPTIVE PROTOCOL", "VISIBLE PULSE", "PULSE RECOVERED BONDS", "PULSE TWISTS", "DASHBOARD NUMBERS"];
   const boolValues = ["on", "yes", "true", "1", "enabled", "enable", "off", "no", "false", "0", "disabled", "disable"];
   for (const key of boolKeys) {
     if (map[key] == null) issues.push("Missing " + key.toLowerCase() + " (default used)");
@@ -4716,7 +4991,9 @@ function CW_buildVisiblePulse(turn) {
     }
   } else if (cfg.pulseRecoveredBonds && recovered.length) {
     const first = recovered[0];
-    message = "recovered " + recovered.length + " existing relationship" + (recovered.length === 1 ? "" : "s") + " • " + CW_pulsePairLabel(first.from, first.to) + (first.role && first.role !== "unknown" ? " [" + CW_roleDisplay(first.role) + "]" : "") + " • /wire " + first.from;
+    const autoFormed = recovered.filter(function(x){ return x && ["observed continuity","shared scenes"].includes(String(x.source||"")); });
+    const label = autoFormed.length === recovered.length ? "formed " + recovered.length + " relationship" + (recovered.length === 1 ? "" : "s") : "recovered " + recovered.length + " existing relationship" + (recovered.length === 1 ? "" : "s");
+    message = label + " • " + CW_pulsePairLabel(first.from, first.to) + (first.role && first.role !== "unknown" ? " [" + CW_roleDisplay(first.role) + "]" : "") + " • /wire " + first.from;
   } else if (usedTwist) {
     message = "relationship thread advanced • /wire twists";
   } else if (Number(cfg.pulseHeartbeatTurns || 0) > 0 && Number(turn) - Number(cw.pulse.lastShownTurn || -9999) >= Number(cfg.pulseHeartbeatTurns)) {
@@ -4749,6 +5026,7 @@ function CW_status() {
     "Cast controls: " + Object.keys(cw.pinnedNpcs || {}).length + " pinned | " + Object.keys(cw.mutedNpcs || {}).length + " muted | manual locks: " + (Object.keys(cw.manualRoleLocks || {}).length + Object.keys(cw.manualAgeLocks || {}).length),
     "Observation: " + cfg.observationTurns + " turns + " + cfg.observationAppearances + " appearances | active bonds: " + cfg.maxContextRelationships + " | cast balance: " + (cfg.castBalance ? "ON" : "OFF") + " | memory anchors: " + cfg.memoryAnchors,
     "Existing-bond recovery: " + (cfg.relationshipBackfill ? "ON" : "OFF") + " | baselines: " + Object.keys(cw.baselines || {}).length + " | card scan: " + (cfg.baselineFromCards ? "ON" : "OFF") + " | backfill history: " + cfg.backfillHistoryActions + " actions | behavior guidance: " + (cfg.behaviorGuidance ? "ON" : "OFF"),
+    "Guaranteed formation: " + (cfg.autoFormBonds ? "ON" : "OFF") + " | NPC↔NPC fallback: " + (cfg.autoFormNpcNpc ? "ON" : "OFF") + " | auto-formed total: " + Number((cw.formation && cw.formation.formed) || 0) + " | history-discovered NPCs: " + Number((cw.formation && cw.formation.discovered) || 0),
     "Character Card Notes: " + (cfg.characterCardNotes ? "ON (" + cfg.characterCardNotesDetail + ", up to " + cfg.characterCardNotesMaxBonds + " bonds/card)" : "OFF") + " | managed panels: " + ((typeof storyCards !== "undefined" && Array.isArray(storyCards)) ? storyCards.filter(function(c){ return c && String(c.description || c.notes || "").indexOf(CW_CHARACTER_NOTES_START) >= 0; }).length : 0),
     "Twist intelligence: need bias " + (cfg.twistNeedBias ? "ON" : "OFF") + " | diversity " + (cfg.twistDiversity ? "ON" : "OFF"),
     "Visible pulse: " + (cfg.visiblePulse ? "ON (" + cfg.pulseDetail + ", severity ≥" + cfg.pulseMinSeverity + ", heartbeat " + cfg.pulseHeartbeatTurns + ")" : "OFF"),
@@ -5005,7 +5283,8 @@ function CW_commandDiagnostics() {
     "Config Story Card: " + (card ? "found" : "not visible yet"),
     "Character Card Notes: " + (CW_config().characterCardNotes ? "ON" : "OFF") + " | managed panels: " + ((typeof storyCards !== "undefined" && Array.isArray(storyCards)) ? storyCards.filter(function(c){ return c && String(c.description || c.notes || "").indexOf(CW_CHARACTER_NOTES_START) >= 0; }).length : 0),
     "Persistent state: " + (stateOk ? "OK" : "ERROR"),
-    "Tracked NPCs: " + Object.keys(cw.npcs || {}).length + " | active events: " + (cw.ledger || []).length + " | archived anchors: " + (cw.archivedAnchors || []).length + " | reconstructed baselines: " + Object.keys(cw.baselines || {}).length,
+    "Tracked NPCs: " + Object.keys(cw.npcs || {}).length + " | active events: " + (cw.ledger || []).length + " | archived anchors: " + (cw.archivedAnchors || []).length + " | established baselines: " + Object.keys(cw.baselines || {}).length,
+    "Auto formation: " + (CW_config().autoFormBonds ? "ON" : "OFF") + " | NPC↔NPC fallback: " + (CW_config().autoFormNpcNpc ? "ON" : "OFF") + " | formed: " + Number((cw.formation&&cw.formation.formed)||0) + " | history-discovered: " + Number((cw.formation&&cw.formation.discovered)||0),
     "Pinned: " + Object.keys(cw.pinnedNpcs || {}).length + " | muted: " + Object.keys(cw.mutedNpcs || {}).length,
     (parserOk && !registryIssues.length && !configIssues.length && stateOk ? "Result: PASS" : "Result: CHECK ITEMS ABOVE")
   ];
@@ -5014,6 +5293,10 @@ function CW_commandDiagnostics() {
 
 function CW_commandResponse(cmd) {
   if (!cmd) return "Crossed Wires: command was lost. Try /wire help.";
+  if (["one","all","status","test","cast","profile"].includes(cmd.type)) {
+    CW_runRelationshipBackfill(CW_turn(), CW_recentHistoryText(CW_config().backfillHistoryActions));
+    CW_runFormationSweep(CW_turn(), "", false);
+  }
   if (cmd.type === "invalid") return "Crossed Wires: " + cmd.error + "\nUsage: " + cmd.usage + "\nType /wire help for all commands.";
   if (cmd.type === "help") return CW_help();
   if (cmd.type === "one") return CW_dashboard(cmd.name);
@@ -5034,12 +5317,14 @@ function CW_commandResponse(cmd) {
   }
   if (cmd.type === "rescan") {
     state.crossedWires.backfill = { historySig:"", cardsSig:"", contextSig:"", modelContextSig:"", scans:0, lastTurn:-1 };
+    state.crossedWires.formation.historySig = "";
     CW_RUNTIME_BACKFILL_CACHE = null;
     const before = Object.keys(state.crossedWires.baselines || {}).length;
     const found = CW_runRelationshipBackfill(CW_turn(), CW_recentHistoryText(CW_config().backfillHistoryActions));
+    const formation = CW_runFormationSweep(CW_turn(), "", true);
     const after = Object.keys(state.crossedWires.baselines || {}).length;
     const cardUpdates = CW_syncCharacterCardNotes(CW_turn(), "manual rescan", true);
-    return "Crossed Wires: relationship rescan complete. New/updated detections: " + found + ". Established baselines: " + before + " → " + after + ". Character Card Notes updated: " + cardUpdates + ". The scan can only use history/context AI Dungeon currently exposes plus Story Cards.";
+    return "Crossed Wires: relationship rescan complete. Explicit detections updated: " + found + ". Recurring NPCs discovered: " + formation.discovered + ". Neutral bonds auto-formed: " + formation.formed + ". Established baselines: " + before + " → " + after + ". Character Card Notes updated: " + cardUpdates + ".";
   }
   if (cmd.type === "unlockage") {
     const changed = CW_unlockAge(cmd.name);
@@ -5149,6 +5434,7 @@ function CW_onInput(text) {
   CW_scanRelationshipText(text, "player input", turn, "");
   CW_touchKnownNpcs(text, turn);
   CW_inferExplicitRoles(text, turn);
+  CW_runFormationSweep(turn, text, false);
   CW_syncCharacterCardNotes(turn, "input");
   return text;
 }
@@ -5172,6 +5458,7 @@ function CW_onContext(text) {
   if (!cfg.enabled) return text;
   CW_seedFromCharacterCards(turn);
   CW_runRelationshipBackfill(turn, text);
+  CW_runFormationSweep(turn, "", false);
 
   // Append-only for AI Dungeon's cache-compatible context mode. Respect live
   // platform headroom and shrink Crossed Wires rather than deleting/reordering
@@ -5221,6 +5508,7 @@ function CW_onOutput(text) {
   CW_scanRelationshipText(visible, "story output", turn, "");
   CW_touchKnownNpcs(visible, turn);
   CW_inferExplicitRoles(visible + "\n" + CW_recentHistoryText(2), turn);
+  CW_runFormationSweep(turn, visible, false);
   state.crossedWires.lastProcessedOutputTurn = turn;
   CW_syncCharacterCardNotes(turn, "output");
   return visible + CW_buildVisiblePulse(turn);

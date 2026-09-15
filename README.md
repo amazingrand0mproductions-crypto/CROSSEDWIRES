@@ -44,7 +44,7 @@ It progressively reconstructs established bonds from information already availab
 - recent history
 - Story Cards and Character Cards
 - accessible context and memory
-- scenario placeholders
+- placeholders
 - relationship language in new outputs
 - semantic backfill from the narrator
 
@@ -59,6 +59,28 @@ Knowing two characters are married establishes the bond. It does not automatical
 Use `/wire rescan` to force a new reconstruction pass over currently accessible history, context and Story Cards.
 
 Use `/wire cards` when you specifically want Character Story Cards re-scanned and their managed Notes panels refreshed immediately.
+
+---
+
+## ⚡ Guaranteed Bond Formation
+
+A recurring character should not remain stuck at **“no bonds detected”** simply because the narrator failed to emit a relationship tag.
+
+With **Auto Form Bonds** enabled, Crossed Wires uses the normal Observation Turns + Observation Appearances gates as an actual graduation system. Once a named NPC has appeared often enough and no stronger relationship has already been established, the engine creates a deliberately neutral **acquaintance** baseline to the player.
+
+That baseline establishes only one fact: **these people know each other now**. It does not invent friendship, attraction, loyalty or trust. Future story events can grow, damage or redefine the bond normally, and explicit family/friendship/romance/professional roles always replace the generic fallback.
+
+Crossed Wires can also mine recurring person-like names from the accessible recent history when no Character Card or previous machine tag registered them. One-off names are ignored; a candidate must recur before it is treated as an NPC.
+
+When **Auto Form NPC-NPC** is enabled, recurring NPC pairs that repeatedly share scenes can form a neutral **associate** connection. Again, this only establishes repeated social contact; stronger roles require real evidence.
+
+Visible Pulse can show the moment a fallback relationship forms:
+
+```text
+⚡ Crossed Wires • formed 1 relationship • Mara → You [acquaintance]
+```
+
+This means a long-running story with recurring characters should build an actual relationship graph even when the model is conservative about relationship tags.
 
 ---
 
