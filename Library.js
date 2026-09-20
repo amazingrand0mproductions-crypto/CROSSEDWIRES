@@ -9,7 +9,7 @@
 // state, scoring, pacing, scars, milestones, trajectory and twist selection.
 // ============================================================================
 
-const CW_ENGINE_VERSION = 14;
+const CW_ENGINE_VERSION = 15;
 
 let CW_RUNTIME_EVENT_INDEX = null;
 let CW_RUNTIME_CONFIG_CACHE = null;
@@ -56,6 +56,8 @@ const CW_DEFAULT_CONFIG = {
   backfillHistoryActions: 40,          // recent history actions inspected for pre-existing relationships
   baselineFromCards: true,             // scan character/story cards for explicit relationship facts
   behaviorGuidance: true,              // turn relationship state into concrete NPC behavior guidance
+  npcAgency: "STRONG",                // OFF | BALANCED | STRONG; how firmly NPCs keep independent goals/boundaries
+  consentGuard: true,                   // romantic/physical advances are attempts, never automatic success
   characterCardNotes: true,             // append a managed live relationship panel to Character Card Notes
   characterCardNotesDetail: "STANDARD",// COMPACT | STANDARD | DETAILED
   characterCardNotesMaxBonds: 8,         // maximum relationships shown per character card
@@ -137,6 +139,11 @@ const CW_EVENT_EFFECTS = {
   reconciliation:          { trust: 4, affection: 6, attachment: 4, resentment: -7, tension: -6, openness: 3 },
   boundary_discussion:     { trust: 2, respect: 3, openness: 4, tension: -1 },
   boundary_respected:      { trust: 4, respect: 4, openness: 2, tension: -3, fear: -2 },
+  boundary_asserted:       { openness: 2, respect: 1, tension: 1 },
+  consent_checked:         { trust: 2, respect: 3, openness: 2 },
+  consent_respected:       { trust: 4, respect: 5, tension: -2, fear: -1 },
+  request_refused:         { tension: 1 },
+  pressure_after_refusal:  { trust: -9, respect: -8, resentment: 8, fear: 5, tension: 8, openness: -5 },
   healthy_space:           { trust: 2, respect: 3, attachment: -1, jealousy: -2, tension: -3 },
   trust_repair:            { trust: 5, openness: 3, respect: 2, resentment: -4, tension: -3 },
   boundary_repair:         { trust: 3, respect: 5, openness: 3, resentment: -4, fear: -2, tension: -4 },
@@ -244,7 +251,7 @@ const CW_ROMANCE_EVENTS = [
   "temptation", "exclusivity_mismatch", "infidelity"
 ];
 const CW_MATURE_EVENTS = ["adult_intimacy", "casual_intimacy", "infidelity", "temptation", "exclusivity_mismatch", "parenthood_news"];
-const CW_TOXIC_EVENTS = ["manipulation", "coercive_pressure", "boundary_violated", "snooping", "blackmail", "power_abused"];
+const CW_TOXIC_EVENTS = ["manipulation", "coercive_pressure", "boundary_violated", "snooping", "blackmail", "power_abused", "pressure_after_refusal"];
 
 // Event metadata keeps model classification from over-scoring one scene. Small
 // social beats cannot be promoted to life-changing severity, and related tags
@@ -258,7 +265,8 @@ const CW_EVENT_SEVERITY_CAPS = {
   care_under_pressure:2, confidentiality_kept:2, ethical_stand:2, testimony_backed:2,
   testimony_challenged:2, cover_protected:2, fame_support:2, crew_loyalty:2, network_trust:2,
   gratitude:1, delegated_trust:2, responsibility_kept:2, responsibility_failed:2,
-  compromise:2, public_praise:2, power_shared:2, mutual_dependence:2
+  compromise:2, public_praise:2, power_shared:2, mutual_dependence:2,
+  boundary_asserted:1, consent_checked:1, consent_respected:2, request_refused:1, pressure_after_refusal:3
 };
 
 const CW_EVENT_GROUPS = {
@@ -269,11 +277,11 @@ const CW_EVENT_GROUPS = {
   relationship_defined:"commitment", exclusivity:"commitment", commitment:"commitment", proposal:"commitment", marriage:"commitment", moving_in:"commitment",
   kept_promise:"reliability", trust_test_passed:"reliability", dependability:"reliability", command_backed:"reliability",
   rescue:"sacrifice", sacrifice:"sacrifice", resource_shared:"sacrifice",
-  apology:"repair_heat", forgiveness:"repair_heat", reconciliation:"repair_heat", mutual_reassurance:"repair_heat",
+  apology:"repair_heat", forgiveness:"repair_heat", reconciliation:"repair_heat", mutual_reassurance:"repair_heat", consent_respected:"repair_heat",
   trust_repair:"repair_trust", boundary_repair:"repair_boundary", abandonment_repair:"repair_abandonment",
   deception:"trust_breach", secrecy_discovered:"trust_breach", broken_promise:"trust_breach", trust_test_failed:"trust_breach",
   betrayal:"major_breach", infidelity:"major_breach", abandonment:"major_breach", boundary_violated:"major_breach", blackmail:"major_breach", coercive_pressure:"major_breach",
-  insult:"conflict", humiliation:"conflict", conflict:"conflict", public_rejection:"conflict", accusation:"conflict",
+  insult:"conflict", humiliation:"conflict", conflict:"conflict", public_rejection:"conflict", accusation:"conflict", request_refused:"conflict", boundary_asserted:"boundary", consent_checked:"boundary",
   jealousy_episode:"jealousy", snooping:"jealousy", suspicion:"jealousy", exclusivity_mismatch:"jealousy",
   cooperation:"teamwork", solidarity:"teamwork", shared_duty:"teamwork", team_victory:"teamwork", team_failure:"teamwork",
   competence_proven:"respect", mentorship:"respect", guidance:"respect", credit_shared:"respect", credit_stolen:"respect",
@@ -284,7 +292,7 @@ const CW_EVENT_GROUPS = {
   network_trust:"openness", network_breach:"trust_breach",
   gratitude:"recognition", delegated_trust:"reliability", responsibility_kept:"reliability", responsibility_failed:"responsibility",
   compromise:"repair_heat", public_praise:"recognition", scapegoating:"reputation", power_shared:"power", power_abused:"major_breach",
-  mutual_dependence:"teamwork"
+  mutual_dependence:"teamwork", pressure_after_refusal:"major_breach"
 };
 
 function CW_eventGroup(kind) { return CW_EVENT_GROUPS[kind] || kind; }
@@ -293,7 +301,7 @@ const CW_ARCHIVE_EVENT_KINDS = [
   "rescue","sacrifice","betrayal","infidelity","breakup","abandonment","boundary_violated",
   "coercive_pressure","blackmail","reconciliation","parenthood_news","trust_repair",
   "boundary_repair","abandonment_repair","secret_identity_revealed","shared_trauma",
-  "power_abused","scapegoating"
+  "power_abused","scapegoating","pressure_after_refusal"
 ];
 
 // Minor friction can dent an established bond without erasing years of history.
@@ -679,6 +687,9 @@ function CW_init() {
   cw.cardNotesSync.digests = cw.cardNotesSync.digests && typeof cw.cardNotesSync.digests === "object" ? cw.cardNotesSync.digests : {};
   cw.cardNotesSync.lastStateSig = String(cw.cardNotesSync.lastStateSig || "");
   cw.command = cw.command || null;
+  cw.agency = cw.agency && typeof cw.agency === "object" ? cw.agency : { lastAttempt:null, lastOutcome:null };
+  if (!Object.prototype.hasOwnProperty.call(cw.agency, "lastAttempt")) cw.agency.lastAttempt = null;
+  if (!Object.prototype.hasOwnProperty.call(cw.agency, "lastOutcome")) cw.agency.lastOutcome = null;
   if (!Number.isFinite(Number(cw.lastCommandTurn))) cw.lastCommandTurn = -9999;
   cw.lastCommandType = cw.lastCommandType || "";
   cw.lastActionCount = Number.isFinite(Number(cw.lastActionCount)) ? Number(cw.lastActionCount) : 0;
@@ -820,8 +831,124 @@ function CW_recentHistoryText(limit) {
   }).join("\n");
 }
 
+// Detect player social attempts that require another character's independent
+// response. This does not decide the outcome; it gives the narrator focused
+// relationship/agency guidance before the model resolves the attempt.
+function CW_detectSocialAttempt(text, turn) {
+  const cfg = CW_config();
+  if (cfg.npcAgency === "OFF") return null;
+  const raw = CW_stripPulseLines(String(text || "")).replace(/\s+/g, " ").trim();
+  if (!raw || /^\s*\/(?:wire|cw|wires|spark)\b/i.test(raw)) return null;
+  const low = raw.toLowerCase();
+  let kind = "";
+  if (/\b(?:kiss|kisses|kissed|make out|making out|caress|fondle|grope|sexual(?:ly)? touch|sleep with|have sex with)\b/i.test(raw)) kind = "physical_romance";
+  else if (/\b(?:ask(?:s|ed)? .*? out|go on a date|date you|confess(?:es|ed)? (?:my|their|his|her)? ?(?:love|feelings)|propose(?:s|d)?(?: marriage)?|marry me)\b/i.test(raw)) kind = "romantic_request";
+  else if (/\b(?:hug|hugs|hugged|embrace|hold(?:s|ing)? hands|cuddle)\b/i.test(raw)) kind = "affectionate_contact";
+  else if (/\b(?:order|orders|ordered|command|commands|commanded|demand|demands|demanded|insist|insists|insisted|tell|tells|told)\b/i.test(raw) && /\b(?:to|must|will|need to|have to)\b/i.test(raw)) kind = "command";
+  else if (/\b(?:ask|asks|asked|request|requests|requested|beg|begs|begged|persuade|persuades|persuaded|convince|convinces|convinced)\b/i.test(raw)) kind = "request";
+  else if (/\b(?:threaten|threatens|threatened|intimidate|intimidates|intimidated|blackmail|blackmails|blackmailed|force|forces|forced|coerce|coerces|coerced)\b/i.test(raw)) kind = "pressure";
+  if (!kind) return null;
+
+  let best = null;
+  for (const key in state.crossedWires.npcs) {
+    const npc = state.crossedWires.npcs[key];
+    if (!npc || CW_isPlayerName(npc.name)) continue;
+    const forms = CW_nameFormsForKey(key).slice().sort(function(a,b){ return b.length-a.length; });
+    for (const form of forms) {
+      const idx = low.indexOf(String(form || "").toLowerCase());
+      if (idx >= 0 && (!best || idx < best.idx || (idx === best.idx && form.length > best.form.length))) best = { key:key, name:npc.name || form, form:form, idx:idx };
+    }
+  }
+  if (!best) {
+    const present = CW_recentSceneNames();
+    if (present.length === 1 && state.crossedWires.npcs[present[0]]) best = { key:present[0], name:state.crossedWires.npcs[present[0]].name, form:"", idx:0 };
+  }
+  return {
+    turn:Number(turn)||0,
+    kind:kind,
+    targetKey:best ? best.key : "",
+    targetName:best ? best.name : "",
+    text:raw.length > 220 ? raw.slice(0,217) + "..." : raw
+  };
+}
+
+function CW_agencyAttemptGuidance(turn) {
+  const cfg = CW_config();
+  if (cfg.npcAgency === "OFF") return "";
+  const rec = state.crossedWires && state.crossedWires.agency ? state.crossedWires.agency.lastAttempt : null;
+  if (!rec || Number(rec.turn) !== Number(turn)) return "";
+  const target = rec.targetName || "the affected NPC";
+  let link = null;
+  if (rec.targetName) link = CW_computeLink(rec.targetName, "YOU", turn);
+  const role = link ? CW_getRole(link.from, link.to) : "unknown";
+  const s = link && link.scores ? link.scores : null;
+  const f = link && link.flags ? link.flags : {};
+  const lines = [];
+  lines.push("PLAYER SOCIAL ATTEMPT: " + rec.kind + " toward " + target + ". Resolve the NPC's response independently; the player action is an attempt, not guaranteed success.");
+
+  // Put contact/consent guidance first so it survives compact-context clipping.
+  if (["physical_romance","romantic_request","affectionate_contact"].includes(rec.kind) && cfg.consentGuard) {
+    lines.push("CONSENT GUARD: romantic/physical contact is never automatic. Resolve whether " + target + " welcomes, hesitates, declines, redirects or reciprocates. Relationship status or attraction may make affection plausible but never creates blanket consent; fear, dependence, authority or compliance are not consent.");
+    if (CW_isFamilyRole(role)) lines.push("This is a family-role bond: romantic/sexual reciprocation is blocked. Keep the response non-romantic and preserve appropriate boundaries.");
+    else if (role === "stranger" || role === "acquaintance" || role === "associate" || role === "unknown") lines.push("There is no established romantic entitlement here. For a stranger/acquaintance, sudden kissing or intimate contact should not be treated as mutually welcome unless the current story clearly establishes willingness first.");
+    else if (CW_ROMANTIC_ROLES.includes(role) || f.defined || f.committed || f.married) lines.push("An established romantic bond makes welcome affection possible, but current conflict, resentment, fear, withdrawal or boundaries still matter in this specific moment.");
+    if (s) {
+      if (s.trust <= -20 || s.resentment >= 35 || s.fear >= 35) lines.push("Current distrust/resentment/fear makes easy reciprocation less plausible; do not smooth over that tension just to satisfy the player action.");
+      else if (s.attraction < 15 && !CW_ROMANTIC_ROLES.includes(role)) lines.push("Crossed Wires has little/no established attraction evidence; do not invent attraction simply to make the advance succeed.");
+    }
+  } else if (rec.kind === "command") {
+    lines.push("COMMAND RESOLUTION: role authority may affect duty, but do not turn subordinates/allies into yes-people. Unsafe, immoral, contradictory, humiliating or self-defeating orders can be questioned, refused, negotiated or obeyed reluctantly according to character and relationship history.");
+  } else if (rec.kind === "request") {
+    lines.push("REQUEST RESOLUTION: trust/loyalty can increase willingness, while resentment, conflicting goals, risk or weak ties can produce refusal or conditions. Do not convert a request into automatic compliance.");
+  } else if (rec.kind === "pressure") {
+    lines.push("PRESSURE RESOLUTION: distinguish coerced compliance from willing cooperation. Fear-based compliance must not be treated as trust, affection, loyalty or consent, and continued pressure after a clear refusal should carry relationship consequences.");
+  }
+
+  if (cfg.npcAgency === "STRONG") {
+    lines.push("NPC AGENCY STRONG: do not default NPCs to agreement or obedience. Use established personality, goals, role, history, trust, respect, loyalty, fear, incentives and current stakes. Refusal, hesitation, conditions, counteroffers, disagreement, leaving, calling for help, changing the subject or accepting are all valid when supported. A player request is not a command to the NPC unless story authority genuinely makes it one, and even authority does not erase judgment or boundaries.");
+  } else {
+    lines.push("NPC AGENCY BALANCED: preserve the NPC's independent goals and boundaries. Cooperation may be likely when the bond supports it, but agreement is never automatic merely because the player asked.");
+  }
+  return lines.join(" ");
+}
+
+
+// Fallback outcome recognition for the most obvious refusals. The narrator is
+// still the primary semantic classifier through hidden CW_EVT tags, but this
+// gives Crossed Wires a deterministic safety net when a model clearly writes a
+// refusal yet forgets to emit the machine event. It intentionally recognizes
+// only unambiguous language so ordinary hesitation is not mis-scored.
+function CW_processAgencyOutcome(visibleText, turn) {
+  const cfg = CW_config();
+  const cw = state.crossedWires;
+  if (!cw || !cw.agency || cfg.npcAgency === "OFF") return false;
+  const rec = cw.agency.lastAttempt;
+  if (!rec || Number(rec.turn) !== Number(turn)) return false;
+  const target = rec.targetName ? CW_resolveNpcName(rec.targetName) : "";
+  const text = CW_stripPulseLines(String(visibleText || ""));
+  if (!text.trim()) return false;
+
+  const explicitBoundary = /\b(?:don['’]?t\s+(?:touch|kiss|grab|come closer)|stop(?:\s+that)?|back off|leave me alone|keep your hands (?:off|to yourself)|get away from me)\b/i.test(text);
+  const clearRefusal = explicitBoundary || /\b(?:refuses?|refused|declines?|declined|rejects?|rejected|not interested|won['’]?t do (?:that|it)|will not do (?:that|it)|cannot do (?:that|it)|can['’]?t do (?:that|it)|pulls? away|steps? back|leans? away|turns? (?:his|her|their) (?:face|head) away|pushes? you away|shakes? (?:his|her|their) head)\b/i.test(text);
+
+  let outcome = "unclear";
+  if (clearRefusal) outcome = explicitBoundary ? "boundary asserted" : "refused";
+  cw.agency.lastOutcome = { turn:Number(turn)||0, kind:rec.kind, targetName:target || rec.targetName || "", outcome:outcome };
+  if (!clearRefusal || !target || CW_isPlayerName(target)) return false;
+
+  const sameTurn = CW_eventsForPair(target, "YOU", turn).filter(function(e){ return Number(e.turn) === Number(turn); });
+  let changed = false;
+  if (explicitBoundary && !sameTurn.some(function(e){ return e.kind === "boundary_asserted"; })) {
+    changed = CW_addEvent(target, "YOU", "boundary_asserted", 1, target + " clearly asserted a boundary in response to the player's " + String(rec.kind || "social") + " attempt", turn) || changed;
+  }
+  if (!sameTurn.some(function(e){ return e.kind === "request_refused" || e.kind === "rejection" || e.kind === "public_rejection"; })) {
+    changed = CW_addEvent(target, "YOU", "request_refused", 1, target + " refused or pulled away from the player's " + String(rec.kind || "social") + " attempt", turn) || changed;
+  }
+  return changed;
+}
+
 const CW_CONFIG_TITLE = "Crossed Wires Config";
-const CW_CONFIG_MARKER = "CWCFG13P";
+const CW_CONFIG_MARKER = "CWCFG15A";
 const CW_CHARACTER_NOTES_START = "----- ⚡ CROSSED WIRES — CHARACTER STATUS -----";
 const CW_CHARACTER_NOTES_END = "----- END CROSSED WIRES STATUS -----";
 
@@ -883,6 +1010,8 @@ function CW_defaultConfigEntryFrom(cfg) {
     "Backfill History: " + c.backfillHistoryActions,
     "Card Relationship Scan: " + (c.baselineFromCards ? "ON" : "OFF"),
     "Behavior Guidance: " + (c.behaviorGuidance ? "ON" : "OFF"),
+    "NPC Agency: " + c.npcAgency,
+    "Consent Guard: " + (c.consentGuard ? "ON" : "OFF"),
     "Character Card Notes: " + (c.characterCardNotes ? "ON" : "OFF"),
     "Card Notes Detail: " + c.characterCardNotesDetail,
     "Card Notes Bonds: " + c.characterCardNotesMaxBonds,
@@ -973,6 +1102,8 @@ function CW_configNotes() {
     "• Backfill History — 5–120 recent history actions to inspect for explicit pre-existing relationship evidence when AI Dungeon exposes them to the script. The platform only provides recent history, so Crossed Wires progressively learns older relationships as evidence becomes available.",
     "• Card Relationship Scan — ON scans Character/NPC Story Cards and relationship-style card text for explicit family, friendship, romance, rivalry, professional and other established bonds, even when those cards are not currently triggered for the narrator.",
     "• Behavior Guidance — ON translates relationship state into concrete, non-forced behavior tendencies such as willingness to confide, cooperate, challenge, protect, avoid, seek reassurance or keep distance. This is guidance, never guaranteed behavior or player control.",
+    "• NPC Agency — OFF, BALANCED, STRONG. BALANCED reminds NPCs to keep independent goals and may refuse requests when the bond/role supports it. STRONG (default) actively resists yes-person behavior: requests, commands, flirting and sudden physical/romantic advances are treated as attempts, not automatic success, and NPCs may refuse, hesitate, counter, leave, challenge or set boundaries based on established character and relationship evidence.",
+    "• Consent Guard — ON makes romantic/physical contact resolve through the NPC’s own current willingness instead of assuming reciprocation. A spouse/partner role does not equal blanket consent, fear/compliance is not consent, family roles are blocked from romance, and strangers/acquaintances do not automatically accept kissing or intimacy without story-supported interest/consent. OFF removes this extra relationship-aware consent guidance but does not disable AI Dungeon safety rules.",
     "• Character Card Notes — ON adds a managed Crossed Wires status panel to Character/NPC Story Card Notes. Your existing Notes are preserved; only the clearly marked Crossed Wires block is replaced when relationship state changes.",
     "• Card Notes Detail — COMPACT, STANDARD, DETAILED. COMPACT shows role/stage only; STANDARD adds arc, trust read, threads and recovered-source information; DETAILED adds recent memories, turning points, behavior guidance and optional exact numbers when Dashboard Numbers is ON.",
     "• Card Notes Bonds — 1–20. Maximum directional relationships shown in each character card's managed Notes panel. Highest-relevance/current bonds are shown first.",
@@ -1022,14 +1153,14 @@ function CW_configNotes() {
     "• Pulse Heartbeat — 0–30 turns. If no pulse has appeared for this many normal turns, show a quiet 'active' heartbeat with tracked NPC/bond counts. 0 disables heartbeat messages.",
     "• Pulse Recovered Bonds — ON shows a pulse when Crossed Wires reconstructs pre-existing relationships from accessible history/cards/context. OFF still reconstructs them silently.",
     "• Pulse Twists — ON shows a subtle pulse when a seeded Crossed Wires relationship thread was actually used by the narrator. It does not reveal the hidden twist text.",
-    "• Dashboard Numbers — ON shows exact hidden scores in /wire and /wires. OFF keeps only descriptive reads.",
+    "• Dashboard Numbers — ON shows exact hidden scores in /wire NAME and /wire all. OFF keeps only descriptive reads.",
     "",
     "REPAIR & LONG-TERM MEMORY",
     "Major betrayal, abandonment and boundary damage creates durable scars. A normal apology or forgiveness lowers immediate heat but does not erase those scars. The narrator must observe concrete repair before trust repair, boundary repair or abandonment repair can reduce them.",
     "When the main event ledger eventually fills, major turning points such as commitments, rescues, betrayals, breakups, sacrifices and repair milestones are moved into a compact archive instead of being forgotten with routine old interactions.",
     "",
     "COMMANDS",
-    "/wire NAME • /wires • /wire status • /wire profile • /wire twists • /wire cast • /wire test • /wire pulse [on/off/subtle/standard/detailed/test] • /wire rescan • /wire cards • /wire forget NAME • /wire merge ALIAS | CANONICAL • /wire role NAME | ROLE • /wire unlockrole NAME [| TO] • /wire age NAME | adult/minor/unknown • /wire unlockage NAME • /wire mute NAME • /wire unmute NAME • /wire pin NAME • /wire unpin NAME • /spark [small|medium|major] • /wire help",
+    "/wire NAME • /wire all • /wire status • /wire profile • /wire twists • /wire cast • /wire agency • /wire test • /wire pulse [on/off/subtle/standard/detailed/test] • /wire rescan • /wire cards • /wire forget NAME • /wire merge ALIAS | CANONICAL • /wire role NAME | ROLE • /wire unlockrole NAME [| TO] • /wire age NAME | adult/minor/unknown • /wire unlockage NAME • /wire mute NAME • /wire unmute NAME • /wire pin NAME • /wire unpin NAME • /wire spark [small|medium|major] • /wire help",
     "Manual /wire role and /wire age corrections become authoritative locks: later model tags or inference cannot silently overwrite them. /wire unlockrole and /wire unlockage release those locks without deleting history. /wire mute preserves history but removes an NPC from automatic relationship context/twists. /wire pin keeps an important NPC context-eligible off-screen without bypassing normal safety or twist rules.",
     "",
     "Internal format marker: " + CW_CONFIG_MARKER
@@ -1090,6 +1221,9 @@ function CW_configFromEntry(entry) {
   cfg.backfillHistoryActions = CW_readNumber(map["BACKFILL HISTORY"], cfg.backfillHistoryActions, 5, 120);
   cfg.baselineFromCards = CW_parseBool(map["CARD RELATIONSHIP SCAN"], cfg.baselineFromCards);
   cfg.behaviorGuidance = CW_parseBool(map["BEHAVIOR GUIDANCE"], cfg.behaviorGuidance);
+  cfg.npcAgency = String(map["NPC AGENCY"] || cfg.npcAgency).trim().toUpperCase();
+  if (!["OFF", "BALANCED", "STRONG"].includes(cfg.npcAgency)) cfg.npcAgency = "STRONG";
+  cfg.consentGuard = CW_parseBool(map["CONSENT GUARD"], cfg.consentGuard);
   cfg.characterCardNotes = CW_parseBool(map["CHARACTER CARD NOTES"], cfg.characterCardNotes);
   cfg.characterCardNotesDetail = String(map["CARD NOTES DETAIL"] || cfg.characterCardNotesDetail).trim().toUpperCase();
   if (!["COMPACT", "STANDARD", "DETAILED"].includes(cfg.characterCardNotesDetail)) cfg.characterCardNotesDetail = "STANDARD";
@@ -1177,13 +1311,13 @@ function CW_upgradeConfigCard(card) {
   if (!card) return;
   const notes = String(card.description || card.notes || "");
   const cleanIdentity = String(card.title || card.name || "") === CW_CONFIG_TITLE && !CW_cardKeysText(card).includes("__crossed_wires_config__");
-  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 14) return;
+  if (cleanIdentity && state.crossedWires && state.crossedWires.configCardVersion >= 15) return;
   // Existing clean cards from older builds still need their Entry/Notes rewritten
   // when the config schema gains settings. Parse the old Entry first so custom
   // choices survive, then write the current schema around those choices.
   const migrated = CW_configFromEntry(card.entry);
   CW_writeConfigCard(card, migrated);
-  if (state.crossedWires) state.crossedWires.configCardVersion = 14;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 15;
 }
 
 function CW_ensureConfigCard() {
@@ -1201,11 +1335,11 @@ function CW_ensureConfigCard() {
   try {
     // Newer AI Dungeon builds accept name/title and notes after the documented
     // keys/entry/type arguments. Older builds simply use the first three.
-    const result = addStoryCard("__cw_config_bootstrap_14__", entry, "Custom", CW_CONFIG_TITLE, notes);
+    const result = addStoryCard("__cw_config_bootstrap_15__", entry, "Custom", CW_CONFIG_TITLE, notes);
     if (Number.isFinite(Number(result))) createdIndex = Number(result);
   } catch (e) {
     try {
-      const result = addStoryCard("__cw_config_bootstrap_14__", entry, "Custom");
+      const result = addStoryCard("__cw_config_bootstrap_15__", entry, "Custom");
       if (Number.isFinite(Number(result))) createdIndex = Number(result);
     } catch (fallbackError) {
       if (typeof log === "function") log("Crossed Wires: could not create config card: " + fallbackError);
@@ -1236,7 +1370,7 @@ function CW_ensureConfigCard() {
   card.name = CW_CONFIG_TITLE;
   card.description = notes;
   card.notes = notes;
-  if (state.crossedWires) state.crossedWires.configCardVersion = 14;
+  if (state.crossedWires) state.crossedWires.configCardVersion = 15;
   CW_RUNTIME_CONFIG_CARD = card;
   CW_RUNTIME_CONFIG_CACHE = null;
   CW_RUNTIME_CONFIG_ENTRY = null;
@@ -2544,6 +2678,39 @@ function CW_behaviorGuidance(link) {
   return choices.slice(0,3).map(function(x){return x.text;}).join("; ");
 }
 
+
+function CW_agencyLinkGuidance(link) {
+  const cfg = CW_config();
+  if (!link || !link.scores || cfg.npcAgency === "OFF") return "";
+  const s = link.scores;
+  const role = CW_getRole(link.from, link.to);
+  const f = link.flags || {};
+  const bits = [];
+
+  // Cooperation is intentionally derived from several pressures instead of a
+  // single "likes you" score. Fear may produce compliance, but never counts as
+  // willing cooperation or consent.
+  const cooperation = (s.trust * 0.28) + (s.loyalty * 0.24) + (s.respect * 0.20) + (s.affection * 0.10) - (s.resentment * 0.24) - (Math.max(0, s.fear) * 0.10);
+  if (cooperation >= 42) bits.push("ordinary cooperation is plausible, but requests can still meet limits or conflicting goals");
+  else if (cooperation >= 15) bits.push("cooperation is conditional rather than automatic");
+  else if (cooperation <= -30) bits.push("requests are likely to meet resistance, conditions or refusal unless duty or strong incentives override it");
+  else bits.push("treat requests case-by-case instead of defaulting to agreement");
+
+  if (["superior","captain","leader","monarch","employer","handler","mentor","teacher","coach"].includes(role)) {
+    bits.push("role authority may create duties, not mindless obedience");
+  } else if (["subordinate","crew","follower","subject","employee","asset","student","athlete"].includes(role)) {
+    bits.push("deference can coexist with dissent, negotiation and personal boundaries");
+  }
+
+  if (CW_isFamilyRole(role)) bits.push("family familiarity never creates romantic or sexual entitlement");
+  else if (["stranger","acquaintance","associate","unknown"].includes(role)) bits.push("weak social entitlement: sudden intimacy or large favors need clear story-supported willingness");
+  else if (CW_ROMANTIC_ROLES.includes(role) || f.defined || f.committed || f.married) bits.push("relationship status can make closeness plausible but never substitutes for current consent");
+
+  if (s.resentment >= 40 || s.trust <= -30) bits.push("existing distrust/resentment should visibly affect how easily this NPC agrees");
+  if (s.fear >= 40) bits.push("fear-driven compliance must remain distinct from willing agreement");
+  return bits.slice(0, 3).join("; ");
+}
+
 function CW_initiativeGuidance(link) {
   if (!link) return "";
   const needs = Array.isArray(link.needs) ? link.needs : [];
@@ -2822,12 +2989,16 @@ function CW_characterCardNotesBlock(card, canonical, turn, cfg) {
         const behavior = CW_behaviorGuidance(link);
         if (behavior) lines.push("  Story effect: " + CW_clipText(behavior, 260));
       }
+      if (cfg.npcAgency !== "OFF") {
+        const agency = CW_agencyLinkGuidance(link);
+        if (agency) lines.push("  Agency: " + CW_clipText(agency, 260));
+      }
       if (cfg.showExactNumbersInDashboard) lines.push("  Scores: " + CW_scoreText(link.scores));
     }
   }
   lines.push("");
   lines.push("How Crossed Wires is using this card: the Entry/user Notes can establish existing relationships; future story events update the live bond state. This managed block is UI/reference only and is excluded from relationship evidence scanning.");
-  lines.push(isPlayerCard ? "Inspect all NPC → YOU bonds: /wires • Re-scan accessible history/cards: /wire rescan" : "Inspect live details: /wire " + canonical + " • Re-scan accessible history/cards: /wire rescan");
+  lines.push(isPlayerCard ? "Inspect all NPC → YOU bonds: /wire all • Re-scan accessible history/cards: /wire rescan" : "Inspect live details: /wire " + canonical + " • Re-scan accessible history/cards: /wire rescan");
   lines.push(CW_CHARACTER_NOTES_END);
   return lines.join("\n");
 }
@@ -2955,6 +3126,8 @@ function CW_handleUndo(turn) {
       if (!durable && Number(b.turn||0) > turn) delete cw.baselines[bk];
     }
     if (cw.scenario && Number(cw.scenario.turn || -1) > turn) cw.scenario = { primary: "UNIVERSAL", secondary: "", confidence: 0, turn: turn };
+    if (cw.agency && cw.agency.lastAttempt && Number(cw.agency.lastAttempt.turn || 0) > Number(turn)) cw.agency.lastAttempt = null;
+    if (cw.agency && cw.agency.lastOutcome && Number(cw.agency.lastOutcome.turn || 0) > Number(turn)) cw.agency.lastOutcome = null;
 
     cw.twist.history = cw.twist.history.filter(function (t) { return (t.turn || 0) <= turn; });
     if (cw.twist.pending && (cw.twist.pending.armedAt || 0) > turn) cw.twist.pending = null;
@@ -3047,8 +3220,8 @@ function CW_repairEvidenceReady(from, to, repairKind, turn) {
       evidence:["honesty","kept_promise","trust_test_passed","dependability","protection","public_defense","confidentiality_kept","network_trust","cover_protected"]
     },
     boundary_repair: {
-      damage:["boundary_violated","coercive_pressure","manipulation","snooping"],
-      evidence:["boundary_discussion","boundary_respected","healthy_space","honesty","apology"]
+      damage:["boundary_violated","coercive_pressure","manipulation","snooping","pressure_after_refusal"],
+      evidence:["boundary_discussion","boundary_respected","healthy_space","consent_checked","consent_respected","honesty","apology"]
     },
     abandonment_repair: {
       damage:["abandonment"],
@@ -3174,7 +3347,7 @@ function CW_relationshipFlags(events) {
     if (e.kind === "casual_intimacy") { f.adultIntimacy = true; f.casualIntimacy = true; }
     if ((e.kind === "betrayal" || e.kind === "infidelity") && e.severity >= 2) f.betrayalScars += (e.kind === "infidelity" ? 2 : 1);
     if (e.kind === "abandonment" && e.severity >= 2) f.abandonmentScars += 1;
-    if (["boundary_violated", "coercive_pressure"].includes(e.kind) && e.severity >= 2) f.boundaryScars += 1;
+    if (["boundary_violated", "coercive_pressure", "pressure_after_refusal"].includes(e.kind) && e.severity >= 2) f.boundaryScars += 1;
     if (e.kind === "trust_repair" && e.severity >= 2) f.betrayalScars = Math.max(0, f.betrayalScars - 1);
     if (e.kind === "boundary_repair" && e.severity >= 2) f.boundaryScars = Math.max(0, f.boundaryScars - 1);
     if (e.kind === "abandonment_repair" && e.severity >= 2) f.abandonmentScars = Math.max(0, f.abandonmentScars - 1);
@@ -3198,6 +3371,7 @@ function CW_applyRoleFlags(flags, role) {
 
 function CW_invalidateEventIndex() {
   CW_RUNTIME_EVENT_INDEX = null;
+  CW_RUNTIME_LINK_CACHE = null;
   CW_RUNTIME_PAIR_CACHE = null;
   CW_RUNTIME_RELEVANT_CACHE = null;
 }
@@ -3285,7 +3459,7 @@ function CW_relationshipNeeds(scores, flags, events, role, trajectory) {
     if (!needs.some(function (n) { return n.id === id; })) needs.push({ id:id, label:label, priority:priority, guidance:guidance });
   }
 
-  if (flags.boundaryScars > 0 || kinds.includes("boundary_violated") || kinds.includes("coercive_pressure") || kinds.includes("power_abused")) {
+  if (flags.boundaryScars > 0 || kinds.includes("boundary_violated") || kinds.includes("coercive_pressure") || kinds.includes("pressure_after_refusal") || kinds.includes("power_abused")) {
     add("boundaries", "safe boundaries", 100, "respect boundaries through consistent behavior before pushing closeness");
   }
   if (flags.betrayalScars > 0 || scores.trust <= -30 || kinds.includes("betrayal") || kinds.includes("infidelity") || kinds.includes("confidentiality_breached") || kinds.includes("network_breach")) {
@@ -3529,11 +3703,11 @@ function CW_computeLink(from, to, turn) {
 
     if ((e.kind === "betrayal" || e.kind === "infidelity") && e.severity >= 2) betrayalScars += (e.kind === "infidelity" ? 2 : 1);
     if (e.kind === "abandonment" && e.severity >= 2) abandonmentScars++;
-    if (["boundary_violated", "coercive_pressure"].includes(e.kind) && e.severity >= 2) boundaryScars++;
+    if (["boundary_violated", "coercive_pressure", "pressure_after_refusal"].includes(e.kind) && e.severity >= 2) boundaryScars++;
     if (e.kind === "trust_repair" && e.severity >= 2) betrayalScars = Math.max(0, betrayalScars - 1);
     if (e.kind === "boundary_repair" && e.severity >= 2) boundaryScars = Math.max(0, boundaryScars - 1);
     if (e.kind === "abandonment_repair" && e.severity >= 2) abandonmentScars = Math.max(0, abandonmentScars - 1);
-    if (cfg.emotionalInertia && e.severity >= 2 && ["betrayal","infidelity","abandonment","breakup","boundary_violated","coercive_pressure","blackmail","power_abused","scapegoating"].includes(e.kind)) {
+    if (cfg.emotionalInertia && e.severity >= 2 && ["betrayal","infidelity","abandonment","breakup","boundary_violated","coercive_pressure","pressure_after_refusal","blackmail","power_abused","scapegoating"].includes(e.kind)) {
       shockUntil = Math.max(shockUntil, Number(e.turn) + Number(cfg.shockWindowTurns || 8));
       shockKind = e.kind;
     }
@@ -4252,6 +4426,7 @@ function CW_relationshipContextLine(link, turn) {
   if (cfg.socialThreads && link.threads && link.threads.length) line += " Live threads: " + link.threads.slice(0,2).map(function(x){return x.label;}).join(", ") + ".";
   if (cfg.powerDynamics && link.power && link.power !== "balanced") line += " Power: " + link.power + ".";
   if (cfg.behaviorGuidance) { const bg = CW_behaviorGuidance(link); if (bg) line += " Likely behavior: " + bg + "."; }
+  if (cfg.npcAgency !== "OFF") { const ag = CW_agencyLinkGuidance(link); if (ag) line += " Agency: " + ag + "."; }
   if (cfg.npcInitiative) { const ig = CW_initiativeGuidance(link); if (ig) line += " Natural initiative: " + ig + "."; }
   if (link.baseline && link.baseline.evidence && link.baseline.evidence.length && link.eventCount <= 2) line += " Established before tracking: " + CW_clipText(link.baseline.evidence[link.baseline.evidence.length-1], 90) + ".";
   if (cfg.bondResilience && ["resilient","very resilient"].includes(link.resilience)) line += " Bond resilience: established history should survive minor friction.";
@@ -4273,7 +4448,7 @@ function CW_contextEventCodes(cfg, profile, links, compact) {
   const allowed = CW_allowedEventCodes(cfg, profile);
   const out = [];
   function add(kind) { if (allowed.includes(kind) && !out.includes(kind)) out.push(kind); }
-  ["warmth","support","empathy","honesty","vulnerability","admiration","gratitude","cooperation","dependability","delegated_trust","responsibility_kept","responsibility_failed","compromise","public_praise","power_shared","power_abused","mutual_dependence","protection","kept_promise","shared_success","apology","forgiveness","insult","deception","broken_promise","betrayal","conflict","suspicion","rivalry","rejection","abandonment"].forEach(add);
+  ["warmth","support","empathy","honesty","vulnerability","admiration","gratitude","cooperation","dependability","delegated_trust","responsibility_kept","responsibility_failed","compromise","public_praise","power_shared","power_abused","mutual_dependence","protection","kept_promise","shared_success","apology","forgiveness","boundary_asserted","consent_checked","consent_respected","request_refused","pressure_after_refusal","insult","deception","broken_promise","betrayal","conflict","suspicion","rivalry","rejection","abandonment"].forEach(add);
   for (const kind of CW_profileEventCodes(profile)) add(kind);
   const active = Array.isArray(links) ? links : [];
   const hasRomance = active.some(function (l) { return CW_ROMANTIC_ROLES.includes(CW_getRole(l.from,l.to)) || l.scores.attraction >= 20 || l.flags.defined || l.flags.committed; });
@@ -4359,8 +4534,12 @@ function CW_contextBlock(turn, hardBudget, baseContext) {
     "Relationships persist. Preserve asymmetric/mixed feelings, commitments, scars and unresolved issues. Never write the protagonist's thoughts, feelings, dialogue, consent, promises or decisions. Track NPC→YOU" + (cfg.enableNpcNpc ? " and NPC→NPC" : " only") + ".",
     cfg.npcInitiative ? "Established NPCs may initiate natural relationship follow-ups when appropriate. Let calm scenes breathe; do not force drama, repeat the same issue or instantly repair major damage." : "Preserve relationship continuity without adding extra NPC social initiative. Let calm scenes breathe; do not force drama or instant repair.",
     cfg.behaviorGuidance ? "Make relationships alter behavior and choices, not just internal labels: who shares information, believes claims, offers access, volunteers help, takes risks, challenges decisions, keeps distance, seeks contact, protects someone, withholds support, or follows up should reflect the established bond and current evidence." : "",
+    cfg.npcAgency === "STRONG" ? "NPC AGENCY: characters are independent people, not yes-people. The protagonist can attempt persuasion, affection, orders or requests, but cannot dictate another character's agreement, attraction, disclosure, obedience or physical response. NPCs may refuse, hesitate, negotiate, disagree, leave, challenge, impose conditions or accept according to their established personality, goals, role, history and current relationship." : (cfg.npcAgency === "BALANCED" ? "NPC AGENCY: preserve independent NPC goals and boundaries; player requests or advances do not automatically succeed." : ""),
+    cfg.consentGuard ? "CONSENT: physical/romantic advances are attempts, not automatic mutual actions. Resolve the NPC's willingness before narrating reciprocation. Attraction, dating, marriage, authority, fear or dependency never create blanket consent. Family roles remain non-romantic." : "",
     CW_profileDirective(profile, cfg)
   ];
+  const agencyAttempt = CW_agencyAttemptGuidance(turn);
+  if (agencyAttempt) core.push(agencyAttempt);
   if (cfg.arcGuidance || cfg.needGuidance) core.push("Treat arc/pressure-point labels as continuity guidance, not mandatory beats. Let characters pursue them indirectly through scenario-appropriate behavior.");
   if (Number(state.crossedWires.lastCommandTurn || -9999) >= turn - Math.max(2, cfg.sceneHistoryActions || 2)) core.push("Any recent Crossed Wires command/dashboard output is interface-only, not story canon, dialogue, narration or a character action. Ignore it when continuing the scene.");
   if (cfg.visiblePulse || Number(state.crossedWires.pulse.lastShownTurn || -9999) >= turn - Math.max(2, cfg.sceneHistoryActions || 2)) core.push("Any line beginning '⚡ Crossed Wires •' is a player-facing UI pulse, not story canon, dialogue, narration, evidence or a character action. Ignore it completely when continuing the scene.");
@@ -4389,6 +4568,7 @@ function CW_contextBlock(turn, hardBudget, baseContext) {
     "TYPE=" + eventCodes.replace(/, /g, ","),
     "Max " + cfg.maxEventsPerTurn + " events. New story-supported evidence only: no routine talk, recalled old incidents, repeated updates or unsupported private feelings. Memory note: factual, <=150 chars, no | or ].",
     "trust_repair/boundary_repair/abandonment_repair require demonstrated rebuilding, not one apology or instant forgiveness. Severe damage has emotional inertia: a few small positive beats are not a reset.",
+    cfg.npcAgency !== "OFF" ? "Agency evidence: use boundary_asserted/request_refused when an NPC independently says no without implying hatred; consent_checked/consent_respected for healthy consent handling; pressure_after_refusal only when someone keeps pressuring after a clear refusal. Refusal is not automatically a relationship failure." : "",
     "When relevant, distinguish personal trust from operational reliability, confidentiality and judgment. Preserve structural power differences without assuming obedience, attraction or helplessness.",
     "New NPCs remain provisional for " + cfg.observationTurns + " turns AND " + cfg.observationAppearances + " appearances; record early evidence conservatively.",
     "[/CROSSED WIRES]"
@@ -4399,7 +4579,8 @@ function CW_contextBlock(turn, hardBudget, baseContext) {
     if (budget < 900) {
       const closing = "\n[/CROSSED WIRES]";
       const microBody = [
-        "[CROSSED WIRES PRIVATE] Profile " + profile.primary + (profile.secondary ? "+" + profile.secondary : "") + ". Preserve active NPC relationship continuity, mixed feelings, agency and consequences. Never decide the protagonist's thoughts/feelings/actions/consent; do not force drama. Crossed Wires pulse/dashboard lines are UI-only and non-canon.",
+        "[CROSSED WIRES PRIVATE] Profile " + profile.primary + (profile.secondary ? "+" + profile.secondary : "") + ". Preserve active NPC relationship continuity, mixed feelings, independent NPC agency and consequences. Player social actions are attempts when another character must cooperate; never auto-accept romance, requests or orders. Never decide the protagonist's thoughts/feelings/actions/consent; do not force drama. Crossed Wires pulse/dashboard lines are UI-only and non-canon.",
+        agencyAttempt ? CW_clipText(agencyAttempt, 240) : "",
         relationshipLines.length > 1 ? relationshipLines[1] : relationshipLines[0]
       ].filter(Boolean).join("\n");
       const available = Math.max(0, budget - closing.length - 2);
@@ -4409,11 +4590,12 @@ function CW_contextBlock(turn, hardBudget, baseContext) {
 
     const lowCodes = CW_contextEventCodes(cfg, profile, links, true).join(",");
     const lowProtocol = [
-      "[CROSSED WIRES PRIVATE] Profile " + profile.primary + (profile.secondary ? "+" + profile.secondary : "") + ". Preserve NPC relationship continuity/mixed feelings; never decide protagonist thoughts, feelings, actions or consent; do not force drama or instant repair. Crossed Wires pulse/dashboard lines are UI-only and non-canon.",
+      "[CROSSED WIRES PRIVATE] Profile " + profile.primary + (profile.secondary ? "+" + profile.secondary : "") + ". Preserve NPC relationship continuity/mixed feelings and independent NPC agency; player requests/advances are attempts, not guaranteed success. Never decide protagonist thoughts, feelings, actions or consent; do not force drama or instant repair. Crossed Wires pulse/dashboard lines are UI-only and non-canon.",
+      agencyAttempt ? CW_clipText(agencyAttempt, 520) : "",
       relationshipLines.length > 1 ? relationshipLines[1] : relationshipLines[0],
       twistLines.length ? CW_clipText(twistLines[0], 220) : "",
       "Hidden tags at END only. NPC [[CW_PERSON|Name|adult/minor/unknown]]. " + (cfg.roleAwareness ? "ROLE [[CW_ROLE|FROM|TO|ROLE]]. " : "") + (cfg.relationshipBackfill ? "EXISTING [[CW_REL|FROM|TO|ROLE|TONE|prior evidence]]. " : "") + "EVENT [[CW_EVT|FROM|TO|TYPE|1/2/3|brief memory]]. FROM is the NPC whose bond changes; TO is who they react toward; never FROM=YOU.",
-      (cfg.enableRomance ? "Romance codes require explicitly romantic evidence; mission/team/family commitment is not romantic commitment. " : "") + "TYPE=" + lowCodes + ". New evidence only; ordinary talk/recalled events need no tag. Repair tags require demonstrated rebuilding.",
+      (cfg.enableRomance ? "Romance codes require explicitly romantic evidence; mission/team/family commitment is not romantic commitment. " : "") + "TYPE=" + lowCodes + ". New evidence only; ordinary talk/recalled events need no tag. Repair tags require demonstrated rebuilding. Refusal/boundaries may be healthy; never treat consent as automatic.",
       "[/CROSSED WIRES]"
     ].filter(Boolean).join("\n");
     if (lowProtocol.length > budget) {
@@ -4441,7 +4623,8 @@ function CW_contextBlock(turn, hardBudget, baseContext) {
   if (result.length > budget) {
     const compactCore = [
       "[CROSSED WIRES — PRIVATE]",
-      "Profile " + profile.primary + (profile.secondary ? "+" + profile.secondary : "") + ". Preserve directional NPC relationship continuity, mixed feelings, agency, consent and consequences. Never decide the protagonist's feelings/actions. Do not force drama or instant repair. Crossed Wires pulse/dashboard lines are UI-only and non-canon.",
+      "Profile " + profile.primary + (profile.secondary ? "+" + profile.secondary : "") + ". Preserve directional NPC relationship continuity, mixed feelings, independent NPC agency, consent and consequences. Player requests, commands and advances are attempts, not guaranteed success. Never decide the protagonist's feelings/actions. Do not force drama or instant repair. Crossed Wires pulse/dashboard lines are UI-only and non-canon.",
+      agencyAttempt ? CW_clipText(agencyAttempt, 520) : "",
       CW_clipText(CW_profileDirective(profile, cfg), 260)
     ];
     const compactProtocol = [
@@ -4867,7 +5050,7 @@ function CW_configIssues() {
   if (!card || !card.entry) return ["Config card is missing; defaults are being used."];
   const map = CW_configMap(card.entry);
   const issues = [];
-  const boolKeys = ["ENABLED", "NPC INITIATIVE", "ARC GUIDANCE", "RELATIONSHIP NEEDS", "GROUP DYNAMICS", "REPETITION DAMPING", "EMOTIONAL INERTIA", "TRUST DOMAINS", "BOND STAGES", "SOCIAL THREADS", "POWER DYNAMICS", "BOND RESILIENCE", "CAST BALANCE", "RELATIONSHIP BACKFILL", "AUTO FORM BONDS", "AUTO FORM NPC-NPC", "CARD RELATIONSHIP SCAN", "BEHAVIOR GUIDANCE", "CHARACTER CARD NOTES", "ROLE AWARENESS", "ROLE INFERENCE", "SCENARIO TWISTS", "OFFSCREEN TWISTS", "TWIST NEED BIAS", "TWIST DIVERSITY", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "ADAPTIVE PROTOCOL", "VISIBLE PULSE", "PULSE RECOVERED BONDS", "PULSE TWISTS", "DASHBOARD NUMBERS"];
+  const boolKeys = ["ENABLED", "NPC INITIATIVE", "ARC GUIDANCE", "RELATIONSHIP NEEDS", "GROUP DYNAMICS", "REPETITION DAMPING", "EMOTIONAL INERTIA", "TRUST DOMAINS", "BOND STAGES", "SOCIAL THREADS", "POWER DYNAMICS", "BOND RESILIENCE", "CAST BALANCE", "RELATIONSHIP BACKFILL", "AUTO FORM BONDS", "AUTO FORM NPC-NPC", "CARD RELATIONSHIP SCAN", "BEHAVIOR GUIDANCE", "CONSENT GUARD", "CHARACTER CARD NOTES", "ROLE AWARENESS", "ROLE INFERENCE", "SCENARIO TWISTS", "OFFSCREEN TWISTS", "TWIST NEED BIAS", "TWIST DIVERSITY", "CURVEBALLS", "NPC TO NPC", "ROMANCE", "MATURE THEMES", "PLAYER IS ADULT", "ADULT INTIMACY", "INFIDELITY", "BREAKUPS", "PARENTHOOD", "TOXIC DRAMA", "ADAPTIVE PROTOCOL", "VISIBLE PULSE", "PULSE RECOVERED BONDS", "PULSE TWISTS", "DASHBOARD NUMBERS"];
   const boolValues = ["on", "yes", "true", "1", "enabled", "enable", "off", "no", "false", "0", "disabled", "disable"];
   for (const key of boolKeys) {
     if (map[key] == null) issues.push("Missing " + key.toLowerCase() + " (default used)");
@@ -4876,6 +5059,7 @@ function CW_configIssues() {
   const enums = {
     "RELATIONSHIP PACE": ["SLOW", "BALANCED", "FAST"],
     "EVENT SENSITIVITY": ["CONSERVATIVE", "BALANCED", "EXPRESSIVE"],
+    "NPC AGENCY": ["OFF", "BALANCED", "STRONG"],
     "SCENARIO MODE": CW_SCENARIO_MODES,
     "ADAPTATION STRENGTH": ["LIGHT", "BALANCED", "FULL"],
     "TWIST MODE": ["OFF", "GROUNDED", "DRAMATIC", "WILD", "UNHINGED"],
@@ -4918,7 +5102,8 @@ function CW_eventDisplayName(kind) {
     public_defense:"public defense", public_rejection:"public rejection", boundary_violated:"boundary crossed",
     relationship_defined:"relationship defined", responsibility_kept:"responsibility kept", responsibility_failed:"responsibility failed",
     secret_identity_reveal:"secret identity revealed", confidentiality_breach:"confidentiality breach",
-    power_shared:"power shared", power_abused:"power abused", mutual_dependence:"mutual dependence"
+    power_shared:"power shared", power_abused:"power abused", mutual_dependence:"mutual dependence",
+    boundary_asserted:"boundary asserted", consent_checked:"consent checked", consent_respected:"consent respected", request_refused:"request refused", pressure_after_refusal:"pressure after refusal"
   };
   return special[kind] || String(kind || "relationship change").replace(/_/g, " ");
 }
@@ -5017,7 +5202,8 @@ function CW_status() {
     "Engine: " + (cfg.enabled ? "ON" : "OFF") + " | NPC initiative: " + (cfg.npcInitiative ? "ON" : "OFF"),
     "NPCs: " + Object.keys(cw.npcs).length + " | active ledger: " + cw.ledger.length + "/" + cfg.maxLedgerEvents + " | archived turning points: " + (cw.archivedAnchors || []).length + "/" + cfg.maxArchiveAnchors,
     "Twist mode: " + cfg.twistMode + " | chance: " + (cfg.twistChancePercent < 0 ? "AUTO (" + CW_twistChance(cfg) + "%)" : cfg.twistChancePercent + "%") + " | starts after turn " + cfg.twistMinTurn,
-    "Commands: slash mode (/wire, /wires, /spark)",
+    "Commands: unified /wire root (for example /wire all, /wire status, /wire spark major)",
+    "NPC agency: " + cfg.npcAgency + " | consent guard: " + (cfg.consentGuard ? "ON" : "OFF"),
     "Relationship pace: " + cfg.relationshipPace + " | event sensitivity: " + cfg.eventSensitivity,
     "Scenario mode: " + cfg.scenarioMode + " | profile stability: " + cfg.profileStabilityTurns + " | detected: " + (CW_currentScenarioProfile().primary || "UNIVERSAL") + (CW_currentScenarioProfile().secondary ? " + " + CW_currentScenarioProfile().secondary : "") + " | adaptation: " + cfg.adaptationStrength,
     "Role awareness: " + (cfg.roleAwareness ? "ON" : "OFF") + " | role inference: " + (cfg.deterministicRoleInference ? "ON" : "OFF") + " | scenario twists: " + (cfg.enableScenarioTwists ? "ON" : "OFF") + " | offscreen twists: " + (cfg.allowOffscreenTwists ? "ON" : "OFF"),
@@ -5057,17 +5243,38 @@ function CW_profileStatus() {
   return lines.join("\n");
 }
 
+function CW_agencyStatus() {
+  const cfg = CW_config();
+  const agencyState = state.crossedWires && state.crossedWires.agency ? state.crossedWires.agency : {};
+  const rec = agencyState.lastAttempt || null;
+  const outcome = agencyState.lastOutcome || null;
+  const lines = [
+    "CROSSED WIRES — NPC AGENCY",
+    "NPC Agency: " + cfg.npcAgency + " | Consent Guard: " + (cfg.consentGuard ? "ON" : "OFF"),
+    "Rule: player requests, commands, flirting and physical/romantic actions are attempts whenever another character must cooperate. NPC agreement is resolved from character + relationship evidence, not assumed.",
+    "Refusal is allowed and is not automatically treated as dislike. Fear/compliance is not consent. Family-role romance remains blocked."
+  ];
+  if (rec) {
+    lines.push("Latest detected social attempt: " + rec.kind + (rec.targetName ? " → " + rec.targetName : "") + " [turn " + rec.turn + "]");
+    lines.push("Input: " + rec.text);
+  } else lines.push("Latest detected social attempt: none");
+  if (outcome) lines.push("Latest clear outcome: " + outcome.outcome + (outcome.targetName ? " — " + outcome.targetName : "") + " [turn " + outcome.turn + "]");
+  lines.push("Fallback refusal recognition: ON for explicit refusal/boundary language when the model forgets a relationship tag.");
+  return lines.join("\n");
+}
+
 function CW_help() {
   return [
     "CROSSED WIRES — SLASH COMMANDS",
     "",
     "Inspect",
     "/wire NAME                    — inspect relationships involving one character",
-    "/wires                        — inspect all tracked relationships",
+    "/wire all                     — inspect all tracked relationships",
     "/wire status                  — engine/config health",
     "/wire profile                 — detected/adaptive scenario profile",
     "/wire twists                  — recent twist seeds and whether they were used",
     "/wire cast                    — pinned/muted NPCs and manual locks",
+    "/wire agency                  — NPC agency/consent status and latest detected social attempt",
     "/wire test                    — run a non-destructive engine/command self-check",
     "/wire pulse                   — show current visible-pulse settings",
     "/wire pulse on|off            — enable/disable visible relationship pulses",
@@ -5093,15 +5300,15 @@ function CW_help() {
     "/wire unlockage NAME          — release the manual age lock",
     "",
     "Twists",
-    "/spark                        — force any eligible twist on the NEXT normal turn",
-    "/spark small                  — force a low-risk relationship beat",
-    "/spark medium                 — force a medium complication",
-    "/spark major                  — force a high-stakes twist when eligible",
+    "/wire spark                  — force any eligible twist on the NEXT normal turn",
+    "/wire spark small            — force a low-risk relationship beat",
+    "/wire spark medium           — force a medium complication",
+    "/wire spark major            — force a high-stakes twist when eligible",
     "",
     "Help",
     "/wire help                    — show this help",
     "",
-    "Short aliases such as /wirestatus, /wireprofile, /wirecast and /wiretwists also work.",
+    "Use /wire as the main command root. Legacy shortcuts such as /wires, /spark and /wirestatus remain accepted for compatibility.",
     "Names with spaces work normally; quotes are supported, e.g. /wire \"Dr. Evelyn Hart\".",
     "Settings live in the 'Crossed Wires Config' Story Card; its Notes explain every option."
   ].join("\n");
@@ -5114,31 +5321,41 @@ function CW_commandNameArg(raw) {
   return s.replace(/\s+$/g, "").trim();
 }
 
-const CW_COMMAND_ROOT_RE = "(?:wire(?:merge|age|role|unlockage|unlockrole|mute|unmute|pin|unpin|forget|cast|cards|twists|status|profile|pulse|help)?|wires|spark|cw)";
+const CW_COMMAND_ROOT_RE = "(?:wire(?:merge|age|role|unlockage|unlockrole|mute|unmute|pin|unpin|forget|cast|cards|twists|status|profile|agency|test|pulse|help|rescan)?|wires|spark|cw)";
 
 function CW_extractCommandText(raw) {
   let s = String(raw || "").replace(/[\u200B\u200C\u200D\u2060\u2063\uFEFF]/g, "").trim();
   if (!s) return "";
 
-  // Direct Story/raw input. Legacy ! commands are normalized to slash form.
-  if (/^[\/!]/.test(s)) {
-    if (s[0] === "!") s = "/" + s.slice(1);
-    return s;
+  // Say-mode wrappers: capture the command *inside* the quoted speech so the
+  // closing wrapper quote is not mistaken for part of an NPC name/argument.
+  let m = s.match(/(?:say|says|said)\s+["“']\s*(\/wire\b.*?)\s*["”']\s*[.!]?\s*$/i);
+  if (m) return String(m[1] || "").trim();
+
+  // Main public form. AI Dungeon may wrap Story/Do input as "> You ..." or use
+  // the player character's name, so find /wire anywhere on the submitted line.
+  m = s.match(/(?:^|[\s>"'“‘])(\/wire\b[^\r\n]*)/i);
+  if (m) return String(m[1] || "").trim();
+
+  // Backwards-compatible aliases. Normalize every alias to /wire so all command
+  // handling uses one path. These are supported but no longer advertised.
+  m = s.match(/(?:^|[\s>"'“‘])\/(wires|spark|cw|wire(?:status|profile|twists|cast|cards|test|help|pulse|merge|age|role|unlockage|unlockrole|mute|unmute|pin|unpin|forget))\b([^\r\n]*)/i);
+  if (m) {
+    const stem = String(m[1] || "").toLowerCase();
+    const tail = String(m[2] || "").replace(/["”’]\s*[.!]?\s*$/g, "").trim();
+    if (stem === "wires") return "/wire all";
+    if (stem === "spark") return "/wire spark" + (tail ? " " + tail : "");
+    if (stem === "cw") return "/wire" + (tail ? " " + tail : "");
+    const map = {
+      wirestatus:"status", wireprofile:"profile", wiretwists:"twists", wirecast:"cast", wirecards:"cards", wiretest:"test", wirehelp:"help", wirepulse:"pulse",
+      wiremerge:"merge", wireage:"age", wirerole:"role", wireunlockage:"unlockage", wireunlockrole:"unlockrole", wiremute:"mute", wireunmute:"unmute", wirepin:"pin", wireunpin:"unpin", wireforget:"forget"
+    };
+    return "/wire " + (map[stem] || stem.replace(/^wire/, "")) + (tail ? " " + tail : "");
   }
 
-  // AI Dungeon Do mode can present input to onInput as: > You /wire ...
-  // Third-person mode may use the player character's name instead of You.
-  let m = s.match(new RegExp("^>\\s*(?:You|[^\\n]{1,80}?)\\s+([\\/!]" + CW_COMMAND_ROOT_RE + "\\b[^\\n]*)$", "i"));
-  if (m) { const x = m[1].trim(); return x[0] === "!" ? "/" + x.slice(1) : x; }
-
-  // Say-style wrappers can arrive as: > You say \"/wire ...\"
-  m = s.match(new RegExp("^>\\s*(?:You|[^\\n]{1,80}?)\\s+(?:say|says|said)\\s+[\\\"'“‘]?(\\/" + CW_COMMAND_ROOT_RE + "\\b.*?)[\\\"'”’]?\\s*$", "i"));
-  if (m) { const x = m[1].trim(); return x[0] === "!" ? "/" + x.slice(1) : x; }
-
-  // Some input modes preserve only surrounding quotes.
-  m = s.match(new RegExp("^[\\\"'“‘](\\/" + CW_COMMAND_ROOT_RE + "\\b.*?)[\\\"'”’]$", "i"));
-  if (m) { const x = m[1].trim(); return x[0] === "!" ? "/" + x.slice(1) : x; }
-
+  // Legacy ! aliases remain accepted for old adventures/macros.
+  m = s.match(/(?:^|[\s>"'“‘])!(wire\b[^\r\n]*|wires\b[^\r\n]*|spark\b[^\r\n]*)/i);
+  if (m) return CW_extractCommandText("/" + String(m[1] || "").trim());
   return "";
 }
 
@@ -5154,6 +5371,7 @@ function CW_parseWireSubcommand(body) {
   if (/^profile$/i.test(b)) return { type: "profile" };
   if (/^twists?$/i.test(b)) return { type: "twists" };
   if (/^cast$/i.test(b)) return { type: "cast" };
+  if (/^agency$/i.test(b)) return { type: "agency" };
   if (/^(?:test|diagnostics?|check)$/i.test(b)) return { type: "test" };
   if (/^(?:rescan|backfill|scan)$/i.test(b)) return { type: "rescan" };
   if (/^(?:cards|cardsync|cardscan)$/i.test(b)) return { type: "cards" };
@@ -5193,7 +5411,7 @@ function CW_parseWireSubcommand(body) {
 
   m = b.match(/^spark(?:\s+(small|medium|major))?\s*$/i);
   if (m) return { type: "spark", tier: String(m[1] || "").toLowerCase() };
-  if (/^spark\b/i.test(b)) return CW_invalidCommand("Spark intensity must be small, medium, major, or omitted.", "/spark [small|medium|major]");
+  if (/^spark\b/i.test(b)) return CW_invalidCommand("Spark intensity must be small, medium, major, or omitted.", "/wire spark [small|medium|major]");
 
   // Anything else after /wire is treated as a character name. Quoting lets a
   // character literally named Status/Profile/etc. bypass the subcommand words.
@@ -5252,7 +5470,7 @@ function CW_readCommand(text) {
 
   m = s.match(/^\/spark(?:\s+(small|medium|major))?\s*$/i);
   if (m) return { type: "spark", tier: String(m[1] || "").toLowerCase() };
-  if (/^\/spark\b/i.test(s)) return CW_invalidCommand("Spark intensity must be small, medium, major, or omitted.", "/spark [small|medium|major]");
+  if (/^\/spark\b/i.test(s)) return CW_invalidCommand("Spark intensity must be small, medium, major, or omitted.", "/wire spark [small|medium|major]");
 
   // A recognized command stem with malformed syntax should never leak into the story.
   if (new RegExp("^\\/" + CW_COMMAND_ROOT_RE + "\\b", "i").test(s)) return CW_invalidCommand("I couldn't parse that Crossed Wires command.", "/wire help");
@@ -5266,13 +5484,15 @@ function CW_commandDiagnostics() {
   const parserChecks = [
     CW_readCommand("/wire status"),
     CW_readCommand("> You /wire profile"),
-    CW_readCommand("/spark major"),
+    CW_readCommand("/wire spark major"),
+    CW_readCommand("> You say \"/wire agency\""),
     CW_readCommand("/wire age Test Person adult")
   ];
   const parserOk = parserChecks[0] && parserChecks[0].type === "status" &&
     parserChecks[1] && parserChecks[1].type === "profile" &&
     parserChecks[2] && parserChecks[2].type === "spark" && parserChecks[2].tier === "major" &&
-    parserChecks[3] && parserChecks[3].type === "invalid";
+    parserChecks[3] && parserChecks[3].type === "agency" &&
+    parserChecks[4] && parserChecks[4].type === "invalid";
   const card = CW_configCard();
   const stateOk = !!cw && Array.isArray(cw.ledger) && Array.isArray(cw.sightings) && !!cw.twist && Array.isArray(cw.twist.history);
   const lines = [
@@ -5283,6 +5503,7 @@ function CW_commandDiagnostics() {
     "Config Story Card: " + (card ? "found" : "not visible yet"),
     "Character Card Notes: " + (CW_config().characterCardNotes ? "ON" : "OFF") + " | managed panels: " + ((typeof storyCards !== "undefined" && Array.isArray(storyCards)) ? storyCards.filter(function(c){ return c && String(c.description || c.notes || "").indexOf(CW_CHARACTER_NOTES_START) >= 0; }).length : 0),
     "Persistent state: " + (stateOk ? "OK" : "ERROR"),
+    "NPC agency: " + CW_config().npcAgency + " | consent guard: " + (CW_config().consentGuard ? "ON" : "OFF"),
     "Tracked NPCs: " + Object.keys(cw.npcs || {}).length + " | active events: " + (cw.ledger || []).length + " | archived anchors: " + (cw.archivedAnchors || []).length + " | established baselines: " + Object.keys(cw.baselines || {}).length,
     "Auto formation: " + (CW_config().autoFormBonds ? "ON" : "OFF") + " | NPC↔NPC fallback: " + (CW_config().autoFormNpcNpc ? "ON" : "OFF") + " | formed: " + Number((cw.formation&&cw.formation.formed)||0) + " | history-discovered: " + Number((cw.formation&&cw.formation.discovered)||0),
     "Pinned: " + Object.keys(cw.pinnedNpcs || {}).length + " | muted: " + Object.keys(cw.mutedNpcs || {}).length,
@@ -5293,7 +5514,7 @@ function CW_commandDiagnostics() {
 
 function CW_commandResponse(cmd) {
   if (!cmd) return "Crossed Wires: command was lost. Try /wire help.";
-  if (["one","all","status","test","cast","profile"].includes(cmd.type)) {
+  if (["one","all","status","test","cast","profile","agency"].includes(cmd.type)) {
     CW_runRelationshipBackfill(CW_turn(), CW_recentHistoryText(CW_config().backfillHistoryActions));
     CW_runFormationSweep(CW_turn(), "", false);
   }
@@ -5305,6 +5526,7 @@ function CW_commandResponse(cmd) {
   if (cmd.type === "status") return CW_status();
   if (cmd.type === "profile") return CW_profileStatus();
   if (cmd.type === "cast") return CW_castStatus();
+  if (cmd.type === "agency") return CW_agencyStatus();
   if (cmd.type === "test") return CW_commandDiagnostics();
   if (cmd.type === "pulse") return CW_pulseCommand(cmd.action);
   if (cmd.type === "cards") {
@@ -5392,7 +5614,7 @@ function CW_activeCommand(turn) {
   const cmd = cw.command;
   if (!cmd) return null;
   const created = Number(cmd.turn);
-  if (Number.isFinite(created) && Math.abs(Number(turn) - created) > 1) {
+  if (Number.isFinite(created) && Math.abs(Number(turn) - created) > 2) {
     cw.command = null;
     return null;
   }
@@ -5435,6 +5657,7 @@ function CW_onInput(text) {
   CW_touchKnownNpcs(text, turn);
   CW_inferExplicitRoles(text, turn);
   CW_runFormationSweep(turn, text, false);
+  state.crossedWires.agency.lastAttempt = CW_detectSocialAttempt(text, turn);
   CW_syncCharacterCardNotes(turn, "input");
   return text;
 }
@@ -5505,6 +5728,7 @@ function CW_onOutput(text) {
 
   CW_prepareOutputTurn(turn);
   const visible = CW_parseModelOutput(text, turn);
+  CW_processAgencyOutcome(visible, turn);
   CW_scanRelationshipText(visible, "story output", turn, "");
   CW_touchKnownNpcs(visible, turn);
   CW_inferExplicitRoles(visible + "\n" + CW_recentHistoryText(2), turn);
